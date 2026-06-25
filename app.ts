@@ -132,7 +132,7 @@ app.route("/api/dev", devRoutes);
 // writes to the unified .scratch/logs/observability.jsonl stream.
 // Dev-only by virtue of recordClientEvents being a no-op in prod,
 // but the route mount stays unconditional so a misconfigured
-// NODE_ENV doesn't break the SPA's breadcrumb POSTs with 404s. See
+// NODE_ENV doesn't break client breadcrumb POSTs with 404s. See
 // src/observability/envelope.ts.
 app.route("/api/_observability", observabilityRoutes);
 

@@ -184,7 +184,7 @@ devRoutes.get(
 
     // Redirect to the requested path (if relative — never to an
     // absolute URL, which would let the link become an open
-    // redirector). Default to the SPA root if no redirect given.
+    // redirector). Default to the app root if no redirect given.
     const target = redirect && redirect.startsWith("/") ? redirect : "/";
     return c.redirect(target);
   },
@@ -688,8 +688,9 @@ devRoutes.get("/info", (c) => {
       },
       "POST /api/dev/app-state": {
         purpose:
-          "SPA push endpoint. The dev-panel client (web/src/lib/devpanel/) " +
-          "POSTs the current store snapshot here on every change + 5s heartbeat.",
+          "Client snapshot push endpoint. A browser client (if one is wired " +
+          "up) POSTs its current state snapshot here; this template ships no " +
+          "SPA, so it is optional.",
         body: { snapshot: "ClientSnapshot", markdown: "string" },
       },
       "GET /api/dev/app-state": {
@@ -704,11 +705,12 @@ devRoutes.get("/info", (c) => {
   });
 });
 
-// ── /app-state — the dev panel's central exchange ──────────────────────────
+// ── /app-state — the dev-state exchange ────────────────────────────────────
 //
-// The SPA pushes its current state to POST /app-state on every store
-// change (+ 5s heartbeat). The agent + the in-browser DevPanel read
-// the merged client + server picture from GET /app-state.
+// A browser client (if one is wired up) may POST its current state to
+// POST /app-state. This template ships no SPA, so the client half is
+// optional; the agent reads the merged client + server picture from
+// GET /app-state, where the server context is always present.
 //
 // The endpoint is the contract the alchemist verification + implement
 // agents lean on: "before driving the browser, curl this and read what
@@ -857,9 +859,9 @@ devRoutes.get("/app-state", (c) => {
   const clientMarkdown = lastClientMarkdown ?? [
     "# Client App State Snapshot",
     "",
-    "_No client snapshot received yet. Either the SPA isn't running, or " +
-    "the dev-panel push pipeline hasn't fired its first heartbeat. See " +
-    "web/src/lib/devpanel/init.ts._",
+    "_No client snapshot received yet. This is an MCP-server template with " +
+    "no browser client, so the server context below is the whole picture. " +
+    "(A client may still POST a snapshot to /api/dev/app-state if one is wired up.)_",
     "",
   ].join("\n");
   const serverMarkdown = formatServerMarkdown(server);

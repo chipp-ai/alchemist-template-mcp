@@ -905,8 +905,8 @@ authRoutes.get("/:provider/callback", async (c) => {
     email: user.email,
   });
 
-  const webUrl = Deno.env.get("WEB_APP_URL") ?? "http://localhost:5173";
-  return c.redirect(webUrl);
+  const appUrl = Deno.env.get("APP_URL") ?? "http://localhost:8000";
+  return c.redirect(appUrl);
 });
 
 export { authRoutes };

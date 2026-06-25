@@ -133,7 +133,7 @@ These guide all code review and implementation decisions:
 - **`staging` IS production.** The `staging` branch serves real users. Treat every staging issue with production-level urgency.
 - Use `.scratch/` for ephemeral files (test scripts, debug logs, scratch data)
 - **ALWAYS capture test output:** `deno task test 2>&1 | tee .scratch/test-output.txt`. Grep the file instead of re-running tests.
-- **Use `deno task test:fast`** for quick iteration (~1min). To run a specific test file: `deno test --env --no-check --allow-all <file>`.
+- **Use `deno task test:fast`** for quick iteration (service unit tests). To run a specific test file: `deno test --env --no-check --allow-all <file>`. Run the full suite with `deno task test`.
 - **Tests that create DB resources must use `createIsolatedUser()`** -- never the shared test user. Parallel tests can delete each other's data.
 - **NEVER use `--no-verify` or `--no-gpg-sign`** on any git command. If hooks fail, fix the underlying issue.
 - Do not reference Vite ports or SPA paths in docs or scripts (this is an API-only template).
@@ -176,7 +176,7 @@ Dev-only — the pipeline no-ops when `NODE_ENV === "production"`.
 ### Running Tests
 
 ```bash
-# Fast iteration (routes + services, ~1min)
+# Fast iteration (service unit tests)
 deno task test:fast 2>&1 | tee .scratch/test-output.txt
 
 # All tests
@@ -241,6 +241,8 @@ Declare in `deno.json`:
 ```
 
 Never write `npm:@modelcontextprotocol/sdk/...` directly in source — `deno lint` `no-import-prefix` will fail CI.
+
+> The `@modelcontextprotocol/sdk` import-map entries are added to `deno.json` by the companion `mcpserver` ticket, together with the server implementation. This shaping ticket (ALCHEM3-2) documents the convention; the specifier is not in `deno.json` yet.
 
 **Server + transport:**
 

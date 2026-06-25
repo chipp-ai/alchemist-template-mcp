@@ -122,7 +122,7 @@ billingRoutes.post(
     }
 
     const defaultReturnUrl =
-      Deno.env.get("WEB_APP_URL") ?? "http://localhost:5173";
+      Deno.env.get("APP_URL") ?? "http://localhost:8000";
 
     try {
       const session = await stripe.billingPortal.sessions.create({
@@ -165,7 +165,7 @@ billingRoutes.post(
       .executeTakeFirstOrThrow();
 
     const defaultWebUrl =
-      Deno.env.get("WEB_APP_URL") ?? "http://localhost:5173";
+      Deno.env.get("APP_URL") ?? "http://localhost:8000";
 
     try {
       // Create or reuse Stripe customer

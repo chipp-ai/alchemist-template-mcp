@@ -162,7 +162,7 @@ CLAUDE.md          project context for AI agents
 - **Bare specifiers** — declare `npm:` / `jsr:` packages in `deno.json` under `imports`. Never write `npm:foo` or `jsr:@bar/baz` directly in source.
 - **MCP SDK** — `@modelcontextprotocol/sdk` via bare specifier. `McpServer` from `@modelcontextprotocol/sdk/server/mcp.js`. `StreamableHTTPServerTransport` (web-standard; host must not pre-parse the body).
 - **Database** — Kysely + CamelCasePlugin. Migrations use `YYYYMMDDHHMMSS_` UTC-timestamp prefix. CamelCase in SELECT/INSERT values; snake_case in WHERE/ORDER BY.
-- **Testing** — `deno task test:fast` for routes + services. Use `createIsolatedUser()` for DB-touching tests. Capture output with `tee .scratch/test-output.txt`.
+- **Testing** — `deno task test:fast` for service unit tests, `deno task test` for the full suite. Use `createIsolatedUser()` for DB-touching tests. Capture output with `tee .scratch/test-output.txt`.
 - **Error handling** — Throw `AppError` subclasses; never bare `console.error`. Use `log` from `@/lib/logger.ts`.
 
 See `CLAUDE.md` for the complete rule set and MCP-specific guidance.
@@ -172,7 +172,7 @@ See `CLAUDE.md` for the complete rule set and MCP-specific guidance.
 ```bash
 deno task dev          # Run API with --watch
 deno task check        # Type-check
-deno task test:fast    # Route + service tests
+deno task test:fast    # Service unit tests
 deno task test         # Full test suite
 deno task fmt          # Format
 deno task lint         # Lint

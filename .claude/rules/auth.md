@@ -5,7 +5,6 @@ paths:
   - "src/auth/**"
   - "src/api/middleware/**"
   - "src/lib/roles.ts"
-  - "web/src/lib/permissions.ts"
   - "src/api/routes/org/**"
   - "src/api/routes/invite/**"
 ---
@@ -34,9 +33,10 @@ orgRoutes.post(
 ## Roles
 
 A 4-role hierarchy lives in **one** file — `src/lib/roles.ts` on the
-server, mirrored EXACTLY in `web/src/lib/permissions.ts` on the client.
-A regression test (`src/__tests__/team.test.ts → "client mirror"`) lints
-the two files for the same capability list and roles.
+server. This is an MCP-server template with no browser client; if a
+client UI is ever wired up it should mirror this hierarchy rather than
+re-author it. The capability/role invariants are linted in
+`src/__tests__/team.test.ts`.
 
 | Role | Count | Powers |
 |---|---|---|
@@ -88,7 +88,8 @@ POST   /api/invite/:token/accept     → consume token (auth required;
                                        authenticated email must match invite email)
 ```
 
-Frontend route: `/#/invite/:token` → `web/src/routes/InviteAccept.svelte`.
+There is no browser client in this MCP-server template; the invite flow
+is API-only via the routes above.
 
 **CRITICAL: removing a member is SOFT-DISCONNECT, not hard-delete.** The
 `DELETE /members/:userId` route sets `users.organization_id = NULL` and

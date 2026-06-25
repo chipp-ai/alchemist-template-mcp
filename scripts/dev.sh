@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown argument: $1"
-      echo "Usage: ./scripts.dev.sh --api-port PORT [--port PORT]"
+      echo "Usage: ./scripts/dev.sh --api-port PORT [--port PORT]"
       exit 1
       ;;
   esac

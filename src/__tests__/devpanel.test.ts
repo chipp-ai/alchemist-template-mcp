@@ -12,7 +12,11 @@
  *     populate the store)
  *   - POST /api/dev/app-state: stores the client snapshot for
  *     subsequent GETs
- *   - Production gate: dev routes self-404 when NODE_ENV=production
+ *
+ * The dev routes are fail-closed behind devRoutesEnabled()
+ * (ALCHEMIST_DEV_ROUTES); the e2e cases opt in for their own duration.
+ * The fail-closed guard's source shape is asserted in
+ * dev-snapshot-restore.test.ts.
  */
 
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
@@ -126,94 +130,97 @@ deno("source: dev-routes register POST and GET /app-state", async () => {
 
 deno("e2e: GET /api/dev/app-state returns server context even with no client push", async () => {
   __resetDevActivityForTests();
-  // Make sure we look like dev (the dev routes' top-level guard reads
-  // NODE_ENV at module-import time, but our process-level value here
-  // is dev because no env was set, so re-imports inherit it).
-  const previousEnv = Deno.env.get("NODE_ENV");
-  if (previousEnv === "production") Deno.env.delete("NODE_ENV");
+  // The dev routes are fail-closed behind devRoutesEnabled(), which reads
+  // ALCHEMIST_DEV_ROUTES (evaluated per-request). Opt in for the duration
+  // of this test, then restore the prior value.
+  const prevDevRoutes = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
+  try {
+    const { devRoutes } = await import("@/api/routes/dev/index.ts");
 
-  // Late-import so the route module's `IS_PROD` constant captures
-  // the right env value.
-  const { devRoutes } = await import("@/api/routes/dev/index.ts");
+    const res = await devRoutes.fetch(
+      new Request("http://localhost/app-state"),
+    );
+    assertEquals(res.status, 200);
+    const body = await res.json() as Record<string, unknown>;
 
-  const res = await devRoutes.fetch(
-    new Request("http://localhost/app-state"),
-  );
-  assertEquals(res.status, 200);
-  const body = await res.json() as Record<string, unknown>;
+    // No client push yet — `client` is null.
+    assertEquals(body.client, null);
 
-  // No client push yet — `client` is null.
-  assertEquals(body.client, null);
+    // Server context is always present.
+    assertExists(body.server);
+    const server = body.server as Record<string, unknown>;
+    assertExists(server.timestamp);
+    assertExists(server.env);
+    assertExists(server.recentRequests);
+    assertExists(server.recentErrors);
 
-  // Server context is always present.
-  assertExists(body.server);
-  const server = body.server as Record<string, unknown>;
-  assertExists(server.timestamp);
-  assertExists(server.env);
-  assertExists(server.recentRequests);
-  assertExists(server.recentErrors);
-
-  // Markdown is rendered with the "no client snapshot yet" copy.
-  assertStringIncludes(body.markdown as string, "No client snapshot received yet");
-
-  // Restore env.
-  if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+    // Markdown is rendered with the "no client snapshot yet" copy.
+    assertStringIncludes(body.markdown as string, "No client snapshot received yet");
+  } finally {
+    if (prevDevRoutes !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", prevDevRoutes);
+    else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
+  }
 });
 
 deno("e2e: POST /api/dev/app-state persists the client snapshot for subsequent GETs", async () => {
   __resetDevActivityForTests();
-  const previousEnv = Deno.env.get("NODE_ENV");
-  if (previousEnv === "production") Deno.env.delete("NODE_ENV");
+  const prevDevRoutes = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
+  try {
+    const { devRoutes } = await import("@/api/routes/dev/index.ts");
 
-  const { devRoutes } = await import("@/api/routes/dev/index.ts");
+    const snapshot = {
+      timestamp: "2026-05-05T22:00:00.000Z",
+      route: { hash: "#/dashboard", path: "/dashboard", params: {} },
+      viewport: { width: 1280, height: 720 },
+      stores: { auth: { user: null, isLoading: false, error: null } },
+      recentErrors: [],
+      storeOrder: ["auth"],
+    };
+    const markdown = "# Client App State Snapshot\n\nfake markdown\n";
 
-  const snapshot = {
-    timestamp: "2026-05-05T22:00:00.000Z",
-    route: { hash: "#/dashboard", path: "/dashboard", params: {} },
-    viewport: { width: 1280, height: 720 },
-    stores: { auth: { user: null, isLoading: false, error: null } },
-    recentErrors: [],
-    storeOrder: ["auth"],
-  };
-  const markdown = "# Client App State Snapshot\n\nfake markdown\n";
+    const post = await devRoutes.fetch(
+      new Request("http://localhost/app-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshot, markdown }),
+      }),
+    );
+    assertEquals(post.status, 200);
 
-  const post = await devRoutes.fetch(
-    new Request("http://localhost/app-state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ snapshot, markdown }),
-    }),
-  );
-  assertEquals(post.status, 200);
-
-  const get = await devRoutes.fetch(
-    new Request("http://localhost/app-state"),
-  );
-  const body = await get.json() as Record<string, unknown>;
-  const client = body.client as Record<string, unknown>;
-  assertExists(client);
-  assertEquals(client.timestamp, snapshot.timestamp);
-  assertStringIncludes(body.markdown as string, "fake markdown");
-
-  if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+    const get = await devRoutes.fetch(
+      new Request("http://localhost/app-state"),
+    );
+    const body = await get.json() as Record<string, unknown>;
+    const client = body.client as Record<string, unknown>;
+    assertExists(client);
+    assertEquals(client.timestamp, snapshot.timestamp);
+    assertStringIncludes(body.markdown as string, "fake markdown");
+  } finally {
+    if (prevDevRoutes !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", prevDevRoutes);
+    else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
+  }
 });
 
 deno("e2e: GET /api/dev/app-state?format=markdown returns text/markdown", async () => {
-  const previousEnv = Deno.env.get("NODE_ENV");
-  if (previousEnv === "production") Deno.env.delete("NODE_ENV");
+  const prevDevRoutes = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
+  try {
+    const { devRoutes } = await import("@/api/routes/dev/index.ts");
 
-  const { devRoutes } = await import("@/api/routes/dev/index.ts");
-
-  const res = await devRoutes.fetch(
-    new Request("http://localhost/app-state?format=markdown"),
-  );
-  assertEquals(res.status, 200);
-  assertStringIncludes(
-    res.headers.get("content-type") ?? "",
-    "text/markdown",
-  );
-  const text = await res.text();
-  assertStringIncludes(text, "Server Context");
-
-  if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+    const res = await devRoutes.fetch(
+      new Request("http://localhost/app-state?format=markdown"),
+    );
+    assertEquals(res.status, 200);
+    assertStringIncludes(
+      res.headers.get("content-type") ?? "",
+      "text/markdown",
+    );
+    const text = await res.text();
+    assertStringIncludes(text, "Server Context");
+  } finally {
+    if (prevDevRoutes !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", prevDevRoutes);
+    else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
+  }
 });

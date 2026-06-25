@@ -107,8 +107,11 @@ export async function createIsolatedUser(
   };
 
   return {
-    user: userRow,
-    org: orgRow,
+    // organizationId/slug are nullable columns in the schema but are
+    // always populated here (we just inserted them), so assert non-null
+    // to satisfy IsolatedTestContext without widening its public type.
+    user: { ...userRow, organizationId: userRow.organizationId! },
+    org: { ...orgRow, slug: orgRow.slug! },
     cleanup,
   };
 }

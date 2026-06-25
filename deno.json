@@ -5,7 +5,7 @@
     "start": "deno run --env --allow-net --allow-env --allow-read --allow-ffi --allow-sys main.ts",
     "check": "deno check main.ts",
     "test": "deno test --parallel --env --no-check --allow-all src/__tests__/",
-    "test:fast": "deno test --parallel --env --no-check --allow-all src/__tests__/routes/ src/__tests__/services/",
+    "test:fast": "deno test --parallel --env --no-check --allow-all src/__tests__/services/",
     "test:watch": "deno test --env --no-check --watch --allow-all src/__tests__/",
     "fmt": "deno fmt",
     "lint": "deno lint",
