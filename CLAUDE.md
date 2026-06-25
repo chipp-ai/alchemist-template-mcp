@@ -120,6 +120,7 @@ import "@/mcp/tools/greet.ts"; // <- add this line
 ```bash
 curl -X POST http://localhost:__API_PORT__/api/mcp \
   -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,

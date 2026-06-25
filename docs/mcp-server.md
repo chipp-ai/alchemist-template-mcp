@@ -143,8 +143,10 @@ Env: MCP_ALLOWED_ORIGINS  comma-separated browser origins to allowlist (default:
 # MCP Inspector
 npx @modelcontextprotocol/inspector http://localhost:8000/api/mcp
 
-# curl smoke-test (initialize)
+# curl smoke-test (initialize). The transport requires the client to accept
+# both application/json and text/event-stream; the reply is an SSE envelope.
 curl -s -X POST http://localhost:8000/api/mcp \
   -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.0.1"}}}'
 ```

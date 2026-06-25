@@ -86,9 +86,12 @@ available at `http://localhost:8000/api/mcp`.
 ### 3. Smoke-test the MCP server
 
 ```bash
-# Initialize handshake
+# Initialize handshake. The Streamable HTTP transport requires the client to
+# accept BOTH application/json and text/event-stream, and replies with an SSE
+# envelope ("event: message\ndata: {...}").
 curl -s -X POST http://localhost:8000/api/mcp \
   -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.0.1"}}}'
 
 # Or connect via the MCP Inspector
@@ -155,6 +158,7 @@ import "@/mcp/tools/greet.ts"; // <- add this line
 ```bash
 curl -X POST http://localhost:8000/api/mcp \
   -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
