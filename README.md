@@ -94,6 +94,18 @@ curl -s -X POST http://localhost:8000/api/mcp \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.0.1"}}}'
 
+# List the registered tools — you should see "echo" in the result.
+curl -s -X POST http://localhost:8000/api/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+
+# Call the echo tool — the result content echoes the message back ("ping").
+curl -s -X POST http://localhost:8000/api/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"ping"}}}'
+
 # Or connect via the MCP Inspector
 npx @modelcontextprotocol/inspector http://localhost:8000/api/mcp
 ```

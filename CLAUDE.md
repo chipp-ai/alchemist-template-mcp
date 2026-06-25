@@ -129,7 +129,21 @@ curl -X POST http://localhost:__API_PORT__/api/mcp \
   }'
 ```
 
-You should see `"greet"` in the `tools` array.
+You should see `"greet"` in the `tools` array. Then call it:
+
+```bash
+curl -X POST http://localhost:__API_PORT__/api/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": { "name": "greet", "arguments": { "name": "world" } }
+  }'
+```
+
+The result `content[0].text` is your tool's output (`Hello, world!`).
 
 **Bare specifier rule:** Import MCP SDK paths as `@modelcontextprotocol/sdk/...` (mapped in `deno.json` to `npm:@modelcontextprotocol/sdk`). Never inline `npm:`, `jsr:`, or `https:` prefixes in source — the `no-import-prefix` lint rule fails CI. Sub-path imports require `.js` extensions (ESM).
 
