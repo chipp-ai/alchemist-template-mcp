@@ -106,9 +106,15 @@ export async function createIsolatedUser(
     }
   };
 
+  // `organizationId` (users) and `slug` (organizations) are nullable columns,
+  // so Kysely types the returned rows as `string | null`. createIsolatedUser
+  // always inserts both non-null, so assert that at the boundary to satisfy
+  // IsolatedTestContext (which declares them as `string`). Without this, the
+  // unsound `string | null` -> `string` assignment only type-errors once the
+  // type program is large enough to fully resolve Kysely's generics.
   return {
-    user: userRow,
-    org: orgRow,
+    user: { ...userRow, organizationId: userRow.organizationId! },
+    org: { ...orgRow, slug: orgRow.slug! },
     cleanup,
   };
 }

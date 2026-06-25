@@ -6,7 +6,7 @@
  */
 
 import { z } from "zod";
-import { registerTool, type McpTool } from "@/mcp/registry.ts";
+import { type McpTool, registerTool } from "@/mcp/registry.ts";
 
 export const echoTool: McpTool = {
   name: "echo",

@@ -95,7 +95,11 @@ Deno.test("MCP: tools/list includes the echo tool", async () => {
   });
 
   assertEquals(status, 200);
-  const rpc = data as { jsonrpc: string; id: number; result?: { tools?: Array<{ name: string; description?: string }> } };
+  const rpc = data as {
+    jsonrpc: string;
+    id: number;
+    result?: { tools?: Array<{ name: string; description?: string }> };
+  };
   assertEquals(rpc.jsonrpc, "2.0");
   assertEquals(rpc.id, 2);
   assertExists(rpc.result);
