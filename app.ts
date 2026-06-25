@@ -139,8 +139,12 @@ app.route("/api/dev", devRoutes);
 app.route("/api/_observability", observabilityRoutes);
 
 // MCP server over Streamable HTTP (Model Context Protocol).
-// Mounted at /api/mcp. See src/api/routes/mcp/index.ts and src/mcp/.
+// Mounted at /api/mcp. The trailing-slash form is mounted too so clients
+// (and proxies that normalize URLs) configured with /api/mcp/ reach the
+// server instead of falling through to the JSON 404 below. Subpaths
+// (/api/mcp/foo) still 404. See src/api/routes/mcp/index.ts and src/mcp/.
 app.route("/api/mcp", mcpRoutes);
+app.route("/api/mcp/", mcpRoutes);
 
 // ── MCP-server template (headless) ──
 // This template serves NO frontend. There is no web/ SPA and no static

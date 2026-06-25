@@ -12,6 +12,7 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { withTestServer } from "../helpers.ts";
 import { mcpRoutes } from "@/api/routes/mcp/index.ts";
+import { app } from "../../../app.ts";
 
 function deno(name: string, fn: () => void | Promise<void>) {
   Deno.test({ name, sanitizeResources: false, sanitizeOps: false, fn });
@@ -120,4 +121,41 @@ deno("mcp: tools/call echo returns the message", async () => {
   assertEquals(content.length > 0, true);
   assertEquals(content[0].type, "text");
   assertEquals(content[0].text, "hello from test");
+});
+
+deno("mcp: real app mounts /api/mcp and /api/mcp/ (trailing slash), subpaths 404", async () => {
+  // Exercises the REAL app from app.ts (full middleware stack), not the
+  // stripped-down withTestServer mount the tests above use. Guards the
+  // mount wiring: both the canonical path and its trailing-slash form must
+  // reach the MCP server, while a subpath must NOT be swallowed by it.
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+  };
+  const initBody = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "test", version: "0.0.1" },
+    },
+  });
+
+  for (const path of ["/api/mcp", "/api/mcp/"]) {
+    const res = await app.request(path, { method: "POST", headers, body: initBody });
+    const text = await res.text();
+    assertEquals(res.status, 200, `expected 200 for ${path}, got ${res.status}`);
+    const match = text.match(/data:\s*(\{[\s\S]*\})/);
+    assertExists(match, `expected an SSE data frame for ${path}`);
+    const json = JSON.parse(match[1]) as Record<string, unknown>;
+    const serverInfo = (json.result as Record<string, unknown>).serverInfo as Record<string, unknown>;
+    assertEquals(serverInfo.name, "alchemist-mcp-server");
+  }
+
+  // A subpath under /api/mcp is not the MCP endpoint; it falls through to 404.
+  const sub = await app.request("/api/mcp/foo", { method: "POST", headers, body: initBody });
+  await sub.text();
+  assertEquals(sub.status, 404, "subpaths under /api/mcp must not be routed to MCP");
 });
