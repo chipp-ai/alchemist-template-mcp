@@ -1,3 +1,5 @@
+> **⚠️ MCP-server template (headless).** Derived from `alchemist-template` with the Svelte SPA (`web/`) removed. Serves a **Deno + Hono** backend whose primary surface is an **MCP server at `/api/mcp`** (added in a follow-on), modeled on the platform's own MCP. Same stack otherwise (Deno 2 · TypeScript · Hono 4 · Kysely + postgres · zod · Arctic · Stripe · date-fns). Use the **web-app** template for a UI; the **api** template for a plain JSON API.
+
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
