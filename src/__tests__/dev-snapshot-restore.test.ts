@@ -92,8 +92,8 @@ deno("get-login: schema accepts email + optional redirect", () => {
 
 // ── Production guard ─────────────────────────────────────────────────────
 
-deno("prod-guard: NODE_ENV=production short-circuits to NotFoundError", () => {
-  assertStringIncludes(source, "const IS_PROD = Deno.env.get(\"NODE_ENV\") === \"production\"");
+deno("prod-guard: dev surface is fail-closed behind devRoutesEnabled()", () => {
+  assertStringIncludes(source, "if (!devRoutesEnabled())");
   assertStringIncludes(source, "throw new NotFoundError(\"Route not found\")");
 });
 
