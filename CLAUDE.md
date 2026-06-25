@@ -2,31 +2,30 @@
 
 [Brief description of what this SaaS product does -- CUSTOMIZE THIS for your product]
 
+This is the **Alchemist MCP-server starter template** — a headless Deno + Hono backend exposing an MCP server at `/api/mcp`. Selected by `create_project(template_key='mcp-server')` on the Alchemist Cloud platform.
+
 **Powered by Alchemist AI** -- Autonomous development platform.
 
 ## Local Dev Ports
 
 @.claude/local-dev.md
 
-All references to `__VITE_PORT__` and `__API_PORT__` in docs mean **your** Vite and API ports from the file above.
+All references to `__API_PORT__` in docs mean **your** API port from the file above.
 
 ## Quick Start
 
 ```bash
 ./scripts/setup.sh                                          # First time only
-./scripts/dev.sh --api-port __API_PORT__ --port __VITE_PORT__  # Start dev stack
+./scripts/dev.sh --api-port __API_PORT__                    # Start dev stack
 ```
 
-**Browser:** Always use `http://localhost:__VITE_PORT__` (Vite), NOT the API port.
+**Hit the API at `http://localhost:__API_PORT__`.** No Vite/SPA in this template.
 
-**HMR is disabled.** Multiple agents build concurrently on the same repo. Frontend changes require a **hard reload** in the browser (Cmd+Shift+R). Do not wait for HMR -- it will not pick up changes.
+**Dev login (local testing):** there is no SMTP / inbox harness in dev, so the email-OTP code never reaches an inbox — sign-in via the OTP form will always block. Two well-lit escape hatches:
 
-**Dev login (local browser testing):** there is no SMTP / inbox harness in dev, so the email-OTP code never reaches an inbox — sign-in via the OTP form will always block. Two well-lit escape hatches:
-
-- **In the browser**, the Login page renders a "Dev login as ..." button below the OTP form (visible only when `import.meta.env.DEV`). It POSTs to `/api/dev/login`, sets a real session cookie, and redirects in. This is the path for human / interactive testing.
 - **From an agent or terminal**, `curl -X POST -H 'Content-Type: application/json' -d '{"email":"agent@dev.local"}' http://localhost:__API_PORT__/api/dev/login -c /tmp/jar.txt` issues the same session. Re-use the cookie jar with `-b /tmp/jar.txt` on subsequent requests.
 
-The `/api/dev/*` routes 404 when `NODE_ENV=production`, and the Login page button is stripped from production SPA builds — both surfaces are local-only by construction. See "Dev affordances" further down for the full route catalog (seed / reset / introspect).
+The `/api/dev/*` routes 404 when `NODE_ENV=production` -- both surfaces are local-only by construction. See "Dev affordances" further down for the full route catalog (seed / reset / introspect).
 
 ## Architecture
 
@@ -36,6 +35,9 @@ src/                    # Deno + Hono API server
     routes/             # Hono route handlers (thin orchestration)
     middleware/          # Auth, validation, error handling
   services/             # Business logic (one service per domain)
+  mcp/                  # MCP server tool registry + tools
+    registry.ts         # Central registration point (imported by /api/mcp route)
+    tools/              # Individual tool modules (registerTool + Zod schema)
   db/
     client.ts           # Kysely client with CamelCasePlugin
     schema.ts           # TypeScript type definitions for all tables
@@ -47,31 +49,96 @@ src/                    # Deno + Hono API server
     services/           # Service unit tests
     helpers.ts          # Test utilities (createIsolatedUser, etc.)
 
-web/                    # Svelte 5 SPA
-  src/
-    routes/             # Page components (hash-based routing)
-    stores/             # Svelte stores (state management)
-    lib/
-      api.ts            # Typed fetch wrapper with 401 handling
-
 db/
   migrations/           # SQL migration files (YYYYMMDDHHMMSS_description.sql)
   migrate.ts            # Migration runner
 
 scripts/
-  dev.sh                # Start full dev stack
+  dev.sh                # Start dev stack
   setup.sh              # First-time project setup
 
 .scratch/               # Ephemeral files (gitignored except .gitkeep)
-  logs/                 # Dev server logs (server.log, vite.log)
+  logs/                 # Dev server logs (server.log)
 ```
 
 **Stack:**
 - **API:** Deno + Hono
-- **Frontend:** Svelte 5 SPA with hash-based routing (`svelte-spa-router`)
+- **MCP:** `@modelcontextprotocol/sdk` (bare specifier in `deno.json`)
 - **Database:** PostgreSQL via Kysely (CamelCasePlugin)
 - **Cache/Sessions:** Redis
 - **Edge Proxy:** Cloudflare Worker (when deployed)
+
+## MCP server — `/api/mcp`
+
+The primary surface is an MCP (Model Context Protocol) server mounted at `POST/GET/DELETE /api/mcp`. It uses the MCP TypeScript SDK's `StreamableHTTPServerTransport`:
+
+- `POST /api/mcp` — handles `InitializeRequest` and JSON-RPC tool calls.
+- `GET /api/mcp` — SSE stream (when the transport emits one).
+- `DELETE /api/mcp` — session teardown.
+
+Stateless mode uses `sessionIdGenerator: undefined`. The transport lifecycle is per-request (or per-session) and the route forwards the raw body to `transport.handleRequest(req, res, body)`.
+
+### Tool registry
+
+Tools live under `src/mcp/tools/`. A central registry (imported by the `/api/mcp` route) calls registration functions on an `McpServer` instance.
+
+### Add a new MCP tool
+
+1. Create a tool module:
+
+```ts
+// src/mcp/tools/hello.ts
+import { z } from "zod";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+export function registerHelloTool(server: McpServer) {
+  server.registerTool(
+    "hello",
+    {
+      description: "Return a friendly greeting.",
+      inputSchema: z.object({
+        name: z.string().min(1),
+      }),
+    },
+    async ({ name }) => ({
+      content: [{ type: "text", text: `Hello, ${name}!` }],
+    }),
+  );
+}
+```
+
+2. Register it from the registry:
+
+```ts
+// src/mcp/registry.ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerHelloTool } from "./tools/hello.ts";
+// ... other tool imports
+
+export function registerAllTools(server: McpServer) {
+  registerHelloTool(server);
+  // ...
+}
+```
+
+3. Verify:
+
+```bash
+curl -X POST http://localhost:__API_PORT__/api/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {}
+  }'
+```
+
+You should see `"hello"` in the `tools` array.
+
+**Bare specifier rule:** Import MCP SDK paths as `@modelcontextprotocol/sdk/...` (mapped in `deno.json` to `npm:@modelcontextprotocol/sdk`). Never inline `npm:`, `jsr:`, or `https:` prefixes in source — the `no-import-prefix` lint rule fails CI. Sub-path imports require `.js` extensions (ESM).
+
+**`create_project(template_key='mcp-server')`:** Alchemist Cloud's project-creation API selects this repo when that key is provided. The generated project starts from a functioning, extensible MCP server at `/api/mcp` with at least one example tool.
 
 ## Engineering Preferences
 
@@ -94,8 +161,7 @@ These guide all code review and implementation decisions:
 - **Use `deno task test:fast`** for quick iteration (~1min). To run a specific test file: `deno test --env --no-check --allow-all <file>`.
 - **Tests that create DB resources must use `createIsolatedUser()`** -- never the shared test user. Parallel tests can delete each other's data.
 - **NEVER use `--no-verify` or `--no-gpg-sign`** on any git command. If hooks fail, fix the underlying issue.
-- **Every interactive element gets `data-testid`** following `{area}-{component}-{element}` convention (e.g., `data-testid="settings-form-input-name"`).
-- **ALWAYS use `./scripts/dev.sh --api-port __API_PORT__ --port __VITE_PORT__`** -- ports are required (no defaults), logs go to `.scratch/logs/`.
+- **ALWAYS use `./scripts/dev.sh --api-port __API_PORT__`** -- port is required (no default), logs go to `.scratch/logs/`.
 
 ## Convention spokes — `.claude/rules/`
 
@@ -126,12 +192,13 @@ Implementation lives in:
 - `src/observability/jsonl-writer.ts` — append-only writer with 10MB rotation
 - `src/observability/envelope.ts` — `recordServerEvent` / `recordClientEvents`
 - `src/api/routes/observability/index.ts` — `POST /api/_observability/breadcrumb` collector
-- `web/src/lib/observability/breadcrumbs.ts` — client-side hooks (installed from `web/src/main.ts`)
 - Hooked into `src/lib/logger.ts` (every emit) and `src/lib/dev-activity.ts` (every recorded request + error)
 
 Dev-only — the entire pipeline no-ops when `NODE_ENV === "production"`. The analytics product will replace the collector with a remote ingest at that boundary when it ships.
 
 **When debugging a user-reported issue, tail this file first** — `tail -n 200 .scratch/logs/observability.jsonl | jq .` gives the most recent slice of what happened in their session, both client and server, in time order.
+
+(Note: client-side breadcrumbs are absent in this headless template; only server events are written.)
 
 ## API Conventions
 
@@ -141,6 +208,16 @@ Dev-only — the entire pipeline no-ops when `NODE_ENV === "production"`. The an
 > The essentials: routes are thin orchestration (logic lives in services),
 > `zValidator` MUST pass `validationHook`, and every response is `{ data }` or
 > `{ error, code }`.
+
+### Roles and team management
+
+> **The full role hierarchy, capability set, `can()`/`canManage()` helpers,
+> invite flow, and soft-disconnect semantics live in `.claude/rules/auth.md`**
+> (auto-loads on `src/auth/**`, `src/api/middleware/**`, `src/lib/roles.ts`).
+> The essentials: 4 roles (owner/admin/editor/viewer), gate routes with
+> `requireCapability(...)`, use `can(role, cap)` (never compare role strings),
+> and member removal is a SOFT-DISCONNECT (`organization_id = NULL`), never a
+> hard delete.
 
 ## Database Conventions
 
@@ -210,372 +287,6 @@ src/__tests__/
 > `.catch(() => {})`; use `log` from `src/lib/logger.ts` with a `source` and
 > pass the `Error` as the 3rd arg; throw `AppError` subclasses and let the
 > global handler format them.
-
-## Frontend Conventions
-
-### Svelte 5 — runes only, NOT Svelte 4
-
-`web/package.json` pins `"svelte": "^5.0.0"`, which compiles in runes mode and **rejects Svelte 4 syntax outright**. Most LLM training data is Svelte 4 — consciously override your defaults when writing or editing `*.svelte` files.
-
-| Concept | Svelte 5 (use this) | Svelte 4 (do NOT use) |
-|---|---|---|
-| Props | `let { foo, bar }: { foo: string; bar?: number } = $props();` | `export let foo: string;` |
-| Local state | `let count = $state(0);` | `let count = 0;` (becomes non-reactive in runes mode) |
-| Derived | `let doubled = $derived(count * 2);` | `$: doubled = count * 2;` |
-| Side effect | `$effect(() => { console.log(count); });` | `$: console.log(count);` |
-| Children/slots | `{@render children()}` with `let { children } = $props();` | `<slot />` |
-
-Unchanged from v4: `bind:value` two-way binding, `$store` access for stores.
-
-**Build gate before push.** Any change touching `web/src/**/*.svelte` MUST be followed by:
-
-```bash
-cd web && npm install --silent && npm run build
-```
-
-The build MUST succeed and produce `web/dist/index.html`. The runtime Dockerfile's `web-builder` stage runs the same command — failures here mean the deploy will fail AFTER the push lands. If the build errors with `Cannot use 'export let' in runes mode` or similar, fix the syntax — **do NOT downgrade Svelte to v4 in `package.json`**, that breaks the platform contract.
-
-### `$effect` on mount is a trap — use `onMount` for one-shot side effects
-
-If a side effect should run **once when the component mounts**, use
-`onMount` from `svelte`, NOT `$effect`. The bug this avoids:
-
-```svelte
-<script>
-  // ❌ BAD — runaway loop
-  $effect(() => {
-    authStore.checkAuth();   // synchronously writes state.isLoading = true
-  });
-</script>
-```
-
-Why this loops: Svelte 5's `$effect` tracks reactive reads for re-run.
-When `checkAuth()` synchronously writes `state.isLoading = true`, Svelte
-internally reads the previous value to decide whether to invalidate
-dependents — and that internal read gets attributed to the currently-
-running `$effect` as a tracked dep. When the `finally` block flips
-`state.isLoading = false`, the effect re-runs, calls `checkAuth` again,
-which writes `isLoading = true`, which re-invalidates the effect…
-**unbounded `/auth/me` loop.** (Reproduced live: 24K requests in 13min
-before the fix.)
-
-```svelte
-<script>
-  import { onMount } from "svelte";
-
-  // ✅ GOOD — fires exactly once after mount, no reactive tracking
-  onMount(() => {
-    authStore.checkAuth();
-  });
-</script>
-```
-
-**Rule:** if your `$effect` body would read no reactive value (it just
-calls a fetcher / store action / API method as a one-shot), it's the
-wrong tool. Reach for `onMount`. Reserve `$effect` for code that
-*intentionally* re-runs when reactive state changes (e.g.
-`$effect(() => { if (authStore.isLoading) return; redirectIfNeeded(); })`
-in App.svelte, where reading `isLoading` is the whole point).
-
-The same trap applies to async work that resolves later (e.g.
-`api.get(...).then(data => state.foo = data)` inside an effect): the
-later `.then()` write fires after the tracking phase and *can* be safe,
-but if the synchronous portion of the effect writes ANY reactive value,
-the loop is back. Default to `onMount` for fetchers; reach for `$effect`
-only when the reactivity is intentional.
-
-### Routing
-
-Hash-based routing via `svelte-spa-router`. Routes defined in `web/src/routes/`.
-
-```typescript
-import { push, replace } from "svelte-spa-router";
-
-// Navigate forward
-push("/dashboard");
-
-// Replace current entry (use for error redirects to avoid back-button loops)
-replace("/apps");
-```
-
-**SPA error redirects: use `replace()`, not `push()`.** When a page load fails (403, 404, catch block) and you redirect away, `push()` creates a back-button loop.
-
-### Modals, dialogs, and overlays — use `<Modal>`, never hand-roll
-
-**There is a design-system modal. Use it. Do not write a `.modal-backdrop` +
-`position: fixed` block in a route.** The primitive is `web/src/components/Modal.svelte`,
-backed by two actions: `web/src/lib/portal.ts` and `web/src/lib/modal.ts`.
-
-```svelte
-<script>
-  import Modal from "../components/Modal.svelte";
-  let open = $state(false);
-</script>
-
-<button onclick={() => (open = true)}>New quote</button>
-
-<Modal {open} title="New quote" onClose={() => (open = false)} size="md">
-  <p>Body content.</p>
-  {#snippet footer()}
-    <button class="btn btn-secondary" onclick={() => (open = false)}>Cancel</button>
-    <button class="btn btn-primary" onclick={save}>Save</button>
-  {/snippet}
-</Modal>
-```
-
-`<Modal>` gives you, for free: portal-out to `#overlay-root`, dimmed backdrop,
-backdrop-click + ESC + close-button dismissal, body scroll-lock (ref-counted so
-stacked overlays behave), and focus capture/restore. Props: `open`, `title?`,
-`onClose`, `size?` (`sm`/`md`/`lg`), `closeOnBackdrop?`, plus a `children` body
-and an optional `footer` snippet.
-
-**Why hand-rolling breaks (the containing-block trap):** every route renders
-inside `.app-main { overflow-y: auto }`. The instant any ancestor gains a
-`transform`, `filter`, `will-change`, or a route-entry animation with a
-`transform` keyframe, that ancestor becomes the *containing block* for
-`position: fixed` descendants. A `fixed; inset: 0` backdrop then resolves
-against that ancestor instead of the viewport, so the modal renders clipped
-into the content column (off-center, jammed under the header) even though the
-CSS looks correct. The bug is invisible in code and only appears once rendered.
-`<Modal>` sidesteps it by portalling the node to `#overlay-root` (a `<body>`
-child, sibling of `#app`), which always resolves against the viewport.
-
-**Overlay z-index register** (keep overlays consistent and correctly stacked):
-`<Modal>` backdrop = `1000`; the security-critical session-timeout overlay =
-`9999` (must always win); the dev panel = `999999`. A new overlay type slots
-between these, it does not invent a higher number than the session-timeout
-warning.
-
-`SessionTimeoutWarning.svelte` is deliberately NOT built on `<Modal>` — it is
-non-dismissable (no backdrop click, no ESC) by security design. That is the one
-sanctioned exception; everything else uses `<Modal>`.
-
-### API Calls
-
-Use the typed client from `web/src/lib/api.ts`:
-
-```typescript
-import { api } from "$lib/api";
-
-const result = await api.get<{ data: Item[] }>("/items");
-const items = result.data;
-```
-
-The client automatically:
-- Prefixes `/api` to paths
-- Includes credentials
-- Redirects to login on 401
-- Parses JSON responses
-
-### Hard Reload Required
-
-HMR is disabled. After any frontend change, hard reload: **Cmd+Shift+R** (Mac) or **Ctrl+Shift+R** (Windows/Linux).
-
-### Roles and team management
-
-> **The full role hierarchy, capability set, `can()`/`canManage()` helpers,
-> invite flow, and soft-disconnect semantics live in `.claude/rules/auth.md`**
-> (auto-loads on `src/auth/**`, `src/api/middleware/**`, `src/lib/roles.ts`,
-> `web/src/lib/permissions.ts`). The essentials: 4 roles
-> (owner/admin/editor/viewer), gate routes with `requireCapability(...)`, use
-> `can(role, cap)` (never compare role strings), and member removal is a
-> SOFT-DISCONNECT (`organization_id = NULL`), never a hard delete.
-
-### Stores and the DevPanel — `defineStore` is mandatory for shared state
-
-Every shared client-side store MUST be declared via `defineStore` from
-`web/src/lib/devpanel/store.svelte.ts`. This is the load-bearing
-convention that lets the DevPanel (visible in dev) AND the agent
-verification pipeline (`GET /api/dev/app-state`) introspect every
-piece of shared state in the running app, without knowing what stores
-any given customer's code happens to have built.
-
-```typescript
-// web/src/stores/cart.svelte.ts
-import { defineStore } from "../lib/devpanel/store.svelte";
-
-interface CartState {
-  items: Array<{ id: string; qty: number }>;
-  isLoading: boolean;
-  error: string | null;
-}
-
-const state = defineStore<CartState>("cart", {
-  items: [],
-  isLoading: false,
-  error: null,
-});
-
-export async function addItem(id: string) {
-  // Always assign at the TOP LEVEL — replace the array, don't push() into it.
-  state.items = [...state.items, { id, qty: 1 }];
-}
-
-export const cartStore = {
-  get items() { return state.items; },
-  get isLoading() { return state.isLoading; },
-  get error() { return state.error; },
-  get count() { return state.items.length; },
-  addItem,
-};
-```
-
-**Then add the import to `web/src/main.ts`** in the eager-load block:
-
-```typescript
-// web/src/main.ts
-import "./stores/auth.svelte";
-import "./stores/organization.svelte";
-import "./stores/cart.svelte";  // ← add new stores here
-```
-
-**Update conventions (the rule):**
-
-- Always update via TOP-LEVEL property assignment: `state.items = [...]`,
-  `state.user = newUser`. The Proxy notifies the DevPanel push pipeline
-  on top-level writes; nested mutations (`state.items.push(x)`,
-  `state.user.name = "X"`) work for component reactivity but are
-  delayed in the DevPanel by up to 5s (heartbeat) instead of being
-  visible immediately.
-- For arrays / Maps / Sets: replace the whole reference, don't mutate
-  in place.
-- The store name (first arg to `defineStore`) is the user-visible
-  identifier in the DevPanel — use snake_case singular nouns
-  (`auth`, `cart`, `editor`, `chat`).
-
-**What NOT to do:**
-
-```typescript
-// ❌ BAD — bare module-level $state. The DevPanel can't see this.
-let count = $state(0);
-let user = $state<User | null>(null);
-
-// ❌ BAD — class instances. Not snapshot-safe (JSON.stringify drops them).
-const state = defineStore("foo", new SomeClass());
-```
-
-Component-local `$state` inside `*.svelte` components is fine — that's
-component scratch state, not shared store state, and the DevPanel
-doesn't try to introspect it.
-
-**Why this matters: the agent's L1 verification check.** Before
-driving the browser to verify a change, the verification subagent
-runs `curl http://localhost:$PORT/api/dev/app-state` to read the
-running app's full state. That endpoint returns every `defineStore`-
-registered store, the current route, viewport, recent client errors,
-recent server requests, and recent server errors — all in one
-structured payload. If you create state via bare `$state` for shared
-data, the agent's pre-browser check is incomplete and verification
-gets harder.
-
-**The DevPanel UI** (floating 🛠 button in the bottom-right when
-`import.meta.env.DEV`) shows the same data live during human
-debugging. Implementation: `web/src/components/DevPanel.svelte`,
-mounted in `App.svelte`. Production builds short-circuit via
-`import.meta.env.PROD` — the panel never renders for end users.
-
-## Brand identity — `src/config/brand.ts` is the only source of truth
-
-The deployed product has a customer-facing name that is **not**
-"Alchemist" — Alchemist is the platform that built this app, not
-the product the end-user sees. The platform sets two env vars on
-the customer pod:
-
-- `APP_NAME` — the user-facing product name (e.g. "Pinterest
-  Clone", "Pickleball Tournament Matchmaker"). Sourced from
-  `platform.projects.brand_config.productName`.
-- `EMAIL_FROM` — the verified transactional sender address
-  (e.g. `noreply@yourapp.adaas.dev`).
-
-`src/config/brand.ts` reads both at boot into a frozen `BRAND`
-object:
-
-```ts
-import { BRAND } from "@/config/brand.ts";
-
-BRAND.name      // "Pinterest Clone"  (or "Your App" if APP_NAME unset)
-BRAND.fromEmail // "noreply@..."       (or "noreply@example.com" if unset)
-BRAND.fromName  // mirrors BRAND.name; pre-formatted for "Name <email>"
-```
-
-**Every customer-facing surface that needs the product name MUST
-import `BRAND` from this module.** Never inline
-`Deno.env.get("APP_NAME") ?? "Alchemist"` — the literal
-`"Alchemist"` is the leak. The defensive fallbacks are
-deliberately generic ("Your App", `noreply@example.com`) so a
-misconfigured pod renders a placeholder, not the platform's
-codename.
-
-Surfaces wired through `BRAND` today:
-- `src/services/email.ts` — every transactional email subject,
-  body, and `From:` header.
-- `web/index.html` — title is the placeholder `Loading…`;
-  `web/public/brand-loader.js` overrides `document.title` with
-  `brand.productName` from `/brand.json` once the SPA boots.
-
-When adding a new surface (OG meta, push notification copy,
-exported PDFs), reach for `BRAND.*` first. If you find yourself
-typing the literal "Alchemist" anywhere in this repo's customer-
-facing code, stop — that's the bug this module exists to prevent.
-
-## Typography — Google Fonts is the only webfont source
-
-All font usage flows through three semantic tokens in `web/src/app.css`:
-
-```css
---font-heading  /* h1-h6 and any "this should feel like a heading" surface */
---font-sans     /* body + UI (buttons, labels, paragraph text) */
---font-mono     /* code, kbd, samp, pre, tabular numerics */
-```
-
-Components **NEVER** hardcode a `font-family` value. They reference one of the three tokens. That contract is the entire point: changing the product's typography is supposed to be a one-token edit, not a find-and-replace across every Svelte file. If you find yourself typing `font-family: "Inter"` (or any literal family name) anywhere in `web/src/`, stop — use the token.
-
-### Adding or changing a font
-
-Two files, always in lockstep:
-
-1. **`web/index.html`** — update the `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?...">`. Include every weight + italic you'll actually use; don't load 9 weights "just in case" (each weight is a separate font file).
-2. **`web/src/app.css`** — update the `--font-heading` / `--font-sans` / `--font-mono` token(s) to put the new family at the front of the stack. Keep the web-safe fallbacks after — they're what renders during the `display=swap` window (and forever for users behind webfont blockers).
-
-**Google Fonts is the only webfont source.** No Adobe Fonts, no self-hosted `@font-face`, no Typekit. Reasons:
-
-- One CDN, well-cached across the open web (visitors land on your app with the font already in their browser cache from another site).
-- `preconnect` + `display=swap` are a known-good loading pattern; we don't have to rediscover it per app.
-- Lets the local-dev agent's `present_choices` swatch pull from a single curated catalog instead of guessing at family availability.
-
-### When the user asks for a "different vibe"
-
-Don't pick fonts blind. The local-dev agent has a `present_choices` tool (in the orchestrator's tool palette) that opens a swatch of 3-4 visual options with sample text rendered in each candidate. Use it for any aesthetic-direction request: "make it feel more rustic", "modernize the typography", "give it a magazine feel", etc. The user picks; the orchestrator reads the chosen option's `spec` field and applies the two-file change above.
-
-Use it for: `font`, `palette`, `layout`, `copy` — anything a designer would present as a swatch rather than guess at.
-
-**Don't** use it for: bug fixes, specific values the user gave you ("use Inter"), or anything with a clearly-right answer. Over-using `present_choices` is annoying.
-
-### The default pairing
-
-The template ships with **Inter** (everything) + **JetBrains Mono** (code). Inter is the deliberate vibe-neutral default — it works for any product category, doesn't lean visual-design-y, and pairs with anything you'd swap in later. Don't change the default in this repo; let customer apps drift on top.
-
-## HIPAA mode — env-var-gated, no schema changes
-
-The template ships every building block for HIPAA-compliant session handling. Activation is binary, sourced from a single env var the Alchemist platform sets on the customer pod when the project was opted into HIPAA during onboarding (and the BAA was signed):
-
-```
-HIPAA_ENABLED=true
-```
-
-When set:
-- Session JWTs expire after **4 hours** instead of 30 days (`src/utils/session-duration.ts`).
-- The session cookie's `Max-Age` matches the JWT's `exp`.
-- `/auth/me` returns `hipaaEnabled: true` and `sessionDurationMs: 14400000`.
-- The SPA arms `sessionTimeoutStore` (`web/src/stores/sessionTimeout.svelte.ts`): activity tracking on `mousedown / keydown / scroll / touchstart / click` (throttled 1/sec), server-touch via `POST /auth/touch` (throttled 1/5 min), warning modal at TTL−5min, force-logout at TTL.
-- Multiple tabs sync via `BroadcastChannel("alchemist-session-activity")` so activity in one tab resets timers in others.
-
-When unset/false:
-- 30-day default sessions, no activity tracking, no warning modal. The `sessionTimeoutStore` stays inert (`active: false`).
-
-There is **no per-user / per-org HIPAA toggle inside this template**. The whole deployed app is HIPAA-bound or it isn't — that's a project-scope decision the alchemist platform records and propagates via the env var. Don't add a `hipaa_enabled` column on `organizations`; the platform's onboarding flow + customer-pod env is the only source of truth.
-
-The `POST /auth/touch` endpoint re-issues a JWT with a fresh `exp` claim and resets the cookie. It calls `requireAuth`, so a session that already lapsed gets 401 → SPA force-logout. The store throttles outgoing `/touch` calls to once per 5 minutes regardless of how active the user is.
 
 ## Git Workflow
 
@@ -718,8 +429,8 @@ Before reporting any implementation as complete:
 1. **Type checks:** `deno task check` passes
 2. **Tests written and passing:** `deno task test:fast 2>&1 | tee .scratch/test-output.txt`
 3. **API tested** (for backend changes): write a scratch test in `.scratch/` and run it
-4. **Browser verified** (for UI changes): hard reload and check the actual rendered result
-5. **No errors** in server logs (`.scratch/logs/server.log`) or browser console
+4. **API verified:** write a scratch test in `.scratch/` and curl the endpoint
+5. **No errors** in server logs (`.scratch/logs/server.log`)
 
 **If ANY check fails: fix, re-run, proceed only when green.**
 
@@ -736,10 +447,10 @@ mcp__dev-server__dev_app_state({ format: "markdown" })   # Markdown, layered rep
 
 GETs `/api/dev/app-state` on the running customer app. Returns one merged payload:
 
-- **Client side** — current route, viewport, every `defineStore`-registered store snapshot, and `recentErrors` (uncaught JS errors captured by `window.onerror` / `unhandledrejection`).
 - **Server side** — the last 20 HTTP requests with method/path/status/duration, and any captured server errors.
+- **Client side** — (headless template) no SPA stores or routes; `defineStore` is not applicable.
 
-**Use this first** for any "is the running app in the state I expect?" question. It answers "what page is the user on / what's in the auth store / did my last PATCH succeed / did the server throw" with a single tool call. The structured JSON (default) is the L1 view; `format: "markdown"` is the L2 deep-dive (same content, formatted for reading).
+**Use this first** for any "is the running app in the state I expect?" question. It answers "did my last PATCH succeed / did the server throw" with a single tool call. The structured JSON (default) is the L1 view; `format: "markdown"` is the L2 deep-dive (same content, formatted for reading).
 
 What `dev_app_state` does NOT capture: plain `console.log` / `console.warn` / `console.info` calls. Those need Tier 2.
 
@@ -757,6 +468,8 @@ Captures every `console.*` call from Chrome via CDP — `log`, `warn`, `error`, 
 - An uncaught error appears in `dev_app_state.client.recentErrors` and you want the surrounding console context.
 - A third-party library is logging warnings you need to read.
 
+(Note: in this headless template there is no client SPA; browser console logs are only relevant when you deliberately navigate the browser to an API response or error page for debugging.)
+
 ### Tier 3 — drive the browser (UI verification)
 
 ```
@@ -767,7 +480,7 @@ mcp__browser-devtools__browser_take_screenshot
 mcp__browser-devtools__browser_execute_js
 ```
 
-Use these when the previous tiers can't answer your question — you need to verify visual layout, click through a flow, or run JS in the page context (e.g. open a WebSocket from the SPA's origin to verify the proxy + auth path).
+Use these when the previous tiers can't answer your question. In this headless template the primary verification path is `curl` + scratch tests; browser tiers are only for inspecting raw API responses or headers in the sandbox when needed.
 
 ### Decision rule
 
@@ -825,59 +538,28 @@ curl -sS -b /tmp/jar.txt http://localhost:8000/api/auth/me
 # → { user: { id, email, name }, organization: {...} }
 ```
 
-### Recipe — verify the same flow in the headless browser
-
-The dev login sets a real `session_id` cookie that's identical to
-what `/verify-otp` would set, so once you've POSTed to
-`/api/dev/login` from the page (e.g. via `browser_evaluate`), the SPA
-behaves as if the user is logged in.
-
-```ts
-// Browser ALWAYS targets the Vite port (__VITE_PORT__), never the API
-// port. Vite serves the SPA shell + proxies /api → :__API_PORT__, so
-// the relative `/api/dev/login` fetch below reaches the API correctly.
-browser_navigate({ url: "http://localhost:__VITE_PORT__/" })
-
-// Bypass OTP — set the session via dev-login from the page itself.
-browser_evaluate({
-  expression: `(async () => {
-    const r = await fetch('/api/dev/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ email: 'agent@dev.local' }),
-    });
-    return r.status;
-  })()`
-})
-
-browser_navigate({ url: "http://localhost:__VITE_PORT__/dashboard" })  // now authed
-browser_screenshot()  // capture the proof
-```
-
-### Recipe — populate mock domain data for visual verification
+### Recipe — populate mock domain data for verification
 
 When the operator asks to "populate mock data", "seed sample
-recipes", "fill in placeholder images", or "make the empty state
-look real" — DO NOT edit the rendering component to invent a
-placeholder. The page renders FROM the DB; changing only the
-component leaves you with the same empty rows.
+records", or "make the empty state look real" — DO NOT edit a handler
+to invent placeholder data. The responses render FROM the DB; changing
+only code leaves you with the same empty rows.
 
 **Do NOT reset reflexively.** Operator-seeded rows live in the
 same tables; `/api/dev/reset` wipes everything. The correct flow
 inspects first and only resets when existing data is structurally
-unfixable (NULL on a field the UI requires, AND no way to fix it
+unfixable (NULL on a field the handler requires, AND no way to fix it
 without re-seeding):
 
 ```bash
 # 1. SEE what's already there.
 curl -sS http://localhost:8000/api/<resource-list-endpoint>
-# If rows exist with the field the UI needs, do NOT seed — the
-# rendering side is what's wrong (auth wall, route mismatch,
-# component bug). Diagnose that instead.
+# If rows exist with the field the handler needs, do NOT seed — the
+# handler side is what's wrong (auth wall, route mismatch, bug).
+# Diagnose that instead.
 
 # 2. Get the organization_id you'd seed INTO if rows are missing
-# or have NULL on the field the UI needs.
+# or have NULL on the field the handler needs.
 curl -sS -X POST -H 'Content-Type: application/json' \
   -d '{"email":"agent@dev.local"}' \
   http://localhost:8000/api/dev/login | jq -r '.organization.id'
@@ -886,31 +568,21 @@ curl -sS -X POST -H 'Content-Type: application/json' \
 # can't UPDATE in place (/api/dev/seed is INSERT-only by design).
 # Narrate the destruction out loud BEFORE running so the operator
 # can stop you: "Clearing N existing rows so I can re-seed with
-# photo URLs filled in." NEVER skip this announcement.
+# the required field filled in." NEVER skip this announcement.
 curl -sS -X POST -H 'Content-Type: application/json' \
   -d '{"tables":["recipes"]}' \
   http://localhost:8000/api/dev/reset
 
-# 4. Insert with EVERY column the UI reads, including image URLs.
+# 4. Insert with EVERY column the handler reads.
 curl -sS -X POST -H 'Content-Type: application/json' \
   -d '{"raw":[{"table":"recipes","rows":[
     {"organization_id":"<UUID>","title":"...","slug":"...",
-     "description":"...","photo_url":"https://images.unsplash.com/...",
-     "photo_width":1200,"photo_height":1600,
-     "servings":4,"prep_minutes":30,"cook_minutes":12}
+     "description":"..."}
   ]}]}' \
   http://localhost:8000/api/dev/seed
 ```
 
-**Image URL conventions** (use real CDN URLs, not `/placeholder.png`):
-
-- Unsplash: `https://images.unsplash.com/photo-<ID>?w=1200&q=80&auto=format&fit=crop` — direct asset URLs, no rate limit at small scale, food/people/landscape topics search-friendly via `unsplash.com/s/photos/<topic>`.
-- Picsum: `https://picsum.photos/seed/<slug>/1200/900` — deterministic-by-seed, good for "any image will do" cases.
-- Avatars: `https://i.pravatar.cc/300?u=<email>` — deterministic by user email.
-
 **There is NO PATCH endpoint** — `/api/dev/seed` only does INSERT and `/api/dev/reset` only does TRUNCATE. To "update" existing rows, reset the table first then re-insert with the new column values. This is intentional: the dev surface stays small, and the agent's mental model is "what should the DB look like" rather than "what's the column-level diff".
-
-**Don't invent placeholders in components when the directive says "populate the data".** The user said "populate" because they want the DB rows to have real-looking values; a `<img src={photo_url ?? '/missing.svg'} />` fallback is not the same and feels broken if every row hits the fallback.
 
 ### Production safety
 
@@ -954,6 +626,31 @@ app.get("/me", (c) => c.json({ user: c.get("user") }));
 ```
 
 NOT the v3 `Hono.Variables` global augmentation pattern. Middleware that mutates the context type without the `Hono<{ Variables: ... }>` generic will type-check but `c.get(...)` will return `unknown` everywhere.
+
+### MCP TypeScript SDK (`@modelcontextprotocol/sdk`)
+
+The SDK is imported via bare specifier (mapped in `deno.json`):
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+```
+
+Tool registration uses `registerTool` (current stable), not the deprecated `.tool()`:
+
+```ts
+server.registerTool(
+  "my_tool",
+  {
+    description: "...",
+    inputSchema: z.object({ name: z.string() }),
+  },
+  async (args) => ({ content: [{ type: "text", text: "..." }] }),
+);
+```
+
+Sub-path imports require `.js` extensions (ESM). Never inline `npm:`, `jsr:`, or `https:` in source.
 
 ### Arctic 2 (`arctic@^2.0.0`)
 
@@ -1014,12 +711,12 @@ This section grows as mistakes are discovered. Check it before writing code.
 - **`countAll()` returns string** -- wrap with `Number()`
 - **`whereIn()` with empty array crashes** -- guard with early return
 - **CamelCase in SELECT/INSERT, snake_case in WHERE/ORDER** -- the CamelCasePlugin only transforms result columns
-- **SPA error redirects use `replace()`, not `push()`** -- prevents back-button loops
-- **Hard reload after frontend changes** -- HMR is disabled
 - **Test isolation requires `createIsolatedUser()`** -- shared users cause FK violations in parallel tests
 - **Deno 2: `Deno.run` removed** -- use `new Deno.Command(...)` (Deno 1 idiom is the default in training data)
 - **Hono 4: custom context via `Hono<{ Variables: ... }>` generic** -- not v3 global `Hono.Variables` augmentation
 - **Arctic 2: tokens are objects with method calls** -- `tokens.accessToken()`, not `tokens.accessToken`
 - **date-fns 3: no default export** -- `import { format } from "date-fns"`, not `import dateFns from "date-fns"`
 - **Stripe 17: pin `apiVersion` on the client** -- SDK major and API version must agree
-- **Svelte 5 runes only** -- `$props()`, `$state()`, `$derived`, `$effect`, `{@render children()}`. NEVER `export let` (compile error)
+- **MCP SDK: use `registerTool`, not `.tool()`** -- `.tool()` is deprecated
+- **MCP sub-imports need `.js` extension** -- `@modelcontextprotocol/sdk/server/mcp.js`, not without `.js`
+- **Bare specifiers only** -- never inline `npm:`, `jsr:`, or `https:` in source (no-import-prefix lint)
