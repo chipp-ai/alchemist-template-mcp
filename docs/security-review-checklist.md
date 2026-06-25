@@ -122,6 +122,11 @@ HTTP transport.
   - If the request has an `Origin` header → reject with a JSON-RPC-shaped 403
     unless the origin is in an explicit allowlist (`MCP_ALLOWED_ORIGINS` env
     var, comma-separated, default empty).
+  - **Absent ≠ empty.** "No `Origin` header" means the header is _truly absent_
+    (`req.headers.get("origin") === null`), not merely falsy. A present-but-blank
+    `Origin:` is still an Origin and must be rejected — guard with
+    `origin === null`, never `if (!origin)`, which waves an empty string through
+    the allowlist and reopens the cross-site hole.
 - **See:** `src/api/routes/mcp/index.ts` (`isOriginAllowed`) and
   `docs/mcp-server.md` for the reference implementation and rationale.
 

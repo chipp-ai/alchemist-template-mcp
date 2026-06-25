@@ -79,6 +79,10 @@ from a victim's browser.
   plugins, the Inspector proxy) are Node-based and send no Origin header.
 - `Origin` present → allowed only if the origin is in `MCP_ALLOWED_ORIGINS`
   (comma-separated env var). Default is empty → all browser origins rejected.
+- A present-but-blank `Origin:` counts as _present_, not absent: the guard tests
+  `origin === null` (truly absent), never `!origin`, so an empty Origin is
+  rejected rather than waved through. (Regression test: `mcp: rejects an empty
+  Origin header`.)
 
 Rejected requests get a JSON-RPC-shaped 403 body so MCP clients that do send an
 Origin get a sensible error.
