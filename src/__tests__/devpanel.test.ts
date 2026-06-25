@@ -363,14 +363,12 @@ deno("source: dev-routes register POST and GET /app-state", async () => {
 
 deno("e2e: GET /api/dev/app-state returns server context even with no client push", async () => {
   __resetDevActivityForTests();
-  // Make sure we look like dev (the dev routes' top-level guard reads
-  // NODE_ENV at module-import time, but our process-level value here
-  // is dev because no env was set, so re-imports inherit it).
+  // Ensure dev routes are enabled for the test (gate uses ALCHEMIST_DEV_ROUTES).
+  const previousDev = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
   const previousEnv = Deno.env.get("NODE_ENV");
   if (previousEnv === "production") Deno.env.delete("NODE_ENV");
 
-  // Late-import so the route module's `IS_PROD` constant captures
-  // the right env value.
   const { devRoutes } = await import("@/api/routes/dev/index.ts");
 
   const res = await devRoutes.fetch(
@@ -395,10 +393,14 @@ deno("e2e: GET /api/dev/app-state returns server context even with no client pus
 
   // Restore env.
   if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+  if (previousDev !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", previousDev); else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
 });
 
 deno("e2e: POST /api/dev/app-state persists the client snapshot for subsequent GETs", async () => {
   __resetDevActivityForTests();
+  // Ensure dev routes are enabled for the test (gate uses ALCHEMIST_DEV_ROUTES).
+  const previousDev = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
   const previousEnv = Deno.env.get("NODE_ENV");
   if (previousEnv === "production") Deno.env.delete("NODE_ENV");
 
@@ -433,9 +435,13 @@ deno("e2e: POST /api/dev/app-state persists the client snapshot for subsequent G
   assertStringIncludes(body.markdown as string, "fake markdown");
 
   if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+  if (previousDev !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", previousDev); else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
 });
 
 deno("e2e: GET /api/dev/app-state?format=markdown returns text/markdown", async () => {
+  // Ensure dev routes are enabled for the test (gate uses ALCHEMIST_DEV_ROUTES).
+  const previousDev = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
   const previousEnv = Deno.env.get("NODE_ENV");
   if (previousEnv === "production") Deno.env.delete("NODE_ENV");
 
@@ -453,4 +459,5 @@ deno("e2e: GET /api/dev/app-state?format=markdown returns text/markdown", async 
   assertStringIncludes(text, "Server Context");
 
   if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+  if (previousDev !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", previousDev); else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
 });
