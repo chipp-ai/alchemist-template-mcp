@@ -12,14 +12,16 @@
  *     populate the store)
  *   - POST /api/dev/app-state: stores the client snapshot for
  *     subsequent GETs
- *   - Production gate: dev routes self-404 when NODE_ENV=production
+ *   - Production gate: dev routes self-404 unless devRoutesEnabled()
+ *     (the fail-closed ALCHEMIST_DEV_ROUTES flag) is set
  *
- * Source-shape lints:
+ * Source-shape lints (SPA lints no-op on the headless MCP-server
+ * template, which has no web/ dir — guarded by hasWebDir()):
  *   - Every store file in web/src/stores/ uses `defineStore` (the
  *     load-bearing convention that makes the dev panel work)
  *   - `App.svelte` mounts `<DevPanel />`
  *   - `main.ts` calls `initDevPanel()`
- *   - `app.ts` mounts `recentActivityMiddleware` gated on NODE_ENV
+ *   - `app.ts` mounts `recentActivityMiddleware` gated on devRoutesEnabled()
  */
 
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
@@ -30,6 +32,7 @@ import {
   recordError,
   recordRequest,
 } from "@/lib/dev-activity.ts";
+import { hasWebDir } from "./helpers.ts";
 
 function deno(name: string, fn: () => void | Promise<void>) {
   Deno.test({ name, sanitizeResources: false, sanitizeOps: false, fn });
@@ -114,6 +117,10 @@ deno("ring: getRecentRequests returns a fresh array (caller can't mutate)", () =
 // ── Source-shape lints (the load-bearing convention) ──────────────────────
 
 deno("source: every web/src/stores/*.svelte.ts uses defineStore", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   const dir = new URL("../../web/src/stores/", import.meta.url);
   const stores: string[] = [];
   for await (const entry of Deno.readDir(dir)) {
@@ -159,6 +166,10 @@ deno("source: every web/src/stores/*.svelte.ts uses defineStore", async () => {
 });
 
 deno("source: web/src/main.ts calls initDevPanel before mounting App", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   const src = await Deno.readTextFile(
     new URL("../../web/src/main.ts", import.meta.url),
   );
@@ -183,6 +194,10 @@ deno("source: web/src/main.ts calls initDevPanel before mounting App", async () 
 });
 
 deno("source: web/src/App.svelte mounts <DevPanel />", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   const src = await Deno.readTextFile(
     new URL("../../web/src/App.svelte", import.meta.url),
   );
@@ -196,7 +211,7 @@ deno("source: web/src/App.svelte mounts <DevPanel />", async () => {
   }
 });
 
-deno("source: app.ts mounts recentActivityMiddleware gated on non-prod", async () => {
+deno("source: app.ts mounts recentActivityMiddleware gated on devRoutesEnabled", async () => {
   const src = await Deno.readTextFile(
     new URL("../../app.ts", import.meta.url),
   );
@@ -206,18 +221,22 @@ deno("source: app.ts mounts recentActivityMiddleware gated on non-prod", async (
         "has request/error history to surface.",
     );
   }
-  // Verify the production gate is on the registration (defense-in-depth
-  // even though the dev routes themselves are also production-gated).
-  if (!src.includes('Deno.env.get("NODE_ENV") !== "production"')) {
+  // Verify the gate uses the fail-closed devRoutesEnabled (ALCHEMIST_DEV_ROUTES)
+  // rather than the old NODE_ENV !== "production" check.
+  if (!src.includes("devRoutesEnabled()")) {
     throw new Error(
-      "app.ts must gate recentActivityMiddleware on NODE_ENV !== \"production\". " +
+      "app.ts must gate recentActivityMiddleware on devRoutesEnabled() (ALCHEMIST_DEV_ROUTES). " +
         "The ring buffer is harmless but accumulating customer-facing " +
-        "request metadata in production memory is unnecessary.",
+        "request metadata unless dev routes are explicitly enabled is unnecessary.",
     );
   }
 });
 
 deno("source: no $effect-on-mount loops in *.svelte components (live-bug regression guard)", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   // Live test caught a pre-existing template bug: components used
   //   $effect(() => { someStore.fetchSomething(); })
   // for one-shot mount-time side effects. Synchronously writing to a
@@ -287,6 +306,10 @@ deno("source: no $effect-on-mount loops in *.svelte components (live-bug regress
 });
 
 deno("source: push pipeline doesn't dedup on shallow signature (live-bug regression guard)", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   // Earlier the push pipeline computed a "shallow signature" of
   // {route, storeOrder, viewport} to skip pushes that looked
   // unchanged. That signature excluded actual store CONTENTS — so
@@ -333,14 +356,12 @@ deno("source: dev-routes register POST and GET /app-state", async () => {
 
 deno("e2e: GET /api/dev/app-state returns server context even with no client push", async () => {
   __resetDevActivityForTests();
-  // Make sure we look like dev (the dev routes' top-level guard reads
-  // NODE_ENV at module-import time, but our process-level value here
-  // is dev because no env was set, so re-imports inherit it).
+  // Ensure dev routes are enabled for the test (gate uses ALCHEMIST_DEV_ROUTES).
+  const previousDev = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
   const previousEnv = Deno.env.get("NODE_ENV");
   if (previousEnv === "production") Deno.env.delete("NODE_ENV");
 
-  // Late-import so the route module's `IS_PROD` constant captures
-  // the right env value.
   const { devRoutes } = await import("@/api/routes/dev/index.ts");
 
   const res = await devRoutes.fetch(
@@ -365,10 +386,14 @@ deno("e2e: GET /api/dev/app-state returns server context even with no client pus
 
   // Restore env.
   if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+  if (previousDev !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", previousDev); else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
 });
 
 deno("e2e: POST /api/dev/app-state persists the client snapshot for subsequent GETs", async () => {
   __resetDevActivityForTests();
+  // Ensure dev routes are enabled for the test (gate uses ALCHEMIST_DEV_ROUTES).
+  const previousDev = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
   const previousEnv = Deno.env.get("NODE_ENV");
   if (previousEnv === "production") Deno.env.delete("NODE_ENV");
 
@@ -403,9 +428,13 @@ deno("e2e: POST /api/dev/app-state persists the client snapshot for subsequent G
   assertStringIncludes(body.markdown as string, "fake markdown");
 
   if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+  if (previousDev !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", previousDev); else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
 });
 
 deno("e2e: GET /api/dev/app-state?format=markdown returns text/markdown", async () => {
+  // Ensure dev routes are enabled for the test (gate uses ALCHEMIST_DEV_ROUTES).
+  const previousDev = Deno.env.get("ALCHEMIST_DEV_ROUTES");
+  Deno.env.set("ALCHEMIST_DEV_ROUTES", "1");
   const previousEnv = Deno.env.get("NODE_ENV");
   if (previousEnv === "production") Deno.env.delete("NODE_ENV");
 
@@ -423,4 +452,5 @@ deno("e2e: GET /api/dev/app-state?format=markdown returns text/markdown", async 
   assertStringIncludes(text, "Server Context");
 
   if (previousEnv !== undefined) Deno.env.set("NODE_ENV", previousEnv);
+  if (previousDev !== undefined) Deno.env.set("ALCHEMIST_DEV_ROUTES", previousDev); else Deno.env.delete("ALCHEMIST_DEV_ROUTES");
 });

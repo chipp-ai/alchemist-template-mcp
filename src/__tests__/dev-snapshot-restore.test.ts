@@ -92,12 +92,12 @@ deno("get-login: schema accepts email + optional redirect", () => {
 
 // ── Production guard ─────────────────────────────────────────────────────
 
-deno("prod-guard: NODE_ENV=production short-circuits to NotFoundError", () => {
-  assertStringIncludes(source, "const IS_PROD = Deno.env.get(\"NODE_ENV\") === \"production\"");
+deno("prod-guard: dev routes short-circuit via devRoutesEnabled to NotFoundError", () => {
+  assertStringIncludes(source, "devRoutesEnabled()");
   assertStringIncludes(source, "throw new NotFoundError(\"Route not found\")");
 });
 
-deno("prod-guard: every dev route is mounted behind the IS_PROD check", () => {
+deno("prod-guard: every dev route is mounted behind the devRoutesEnabled guard", () => {
   // The guard is a single use('*') middleware before any route
   // registration. Source check confirms it's the FIRST devRoutes.*
   // invocation — anything registered before the guard wouldn't be

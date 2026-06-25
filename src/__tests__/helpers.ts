@@ -171,3 +171,23 @@ export function withTestServer(
   setup(app);
   return app;
 }
+
+/**
+ * True when the repo has a `web/` SPA directory.
+ *
+ * The headless MCP-server template has no `web/`, so SPA-only
+ * source-shape lints (defineStore usage, DevPanel mount, etc.) early-return
+ * on `!(await hasWebDir())` instead of throwing on a missing directory.
+ * Only a genuine "not found" counts as absent — any other stat error
+ * (permissions, bad resource) is re-thrown so it can't masquerade as a
+ * vacuous skip on a repo that actually ships a SPA.
+ */
+export async function hasWebDir(): Promise<boolean> {
+  try {
+    await Deno.stat(new URL("../../web/", import.meta.url));
+    return true;
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) return false;
+    throw err;
+  }
+}

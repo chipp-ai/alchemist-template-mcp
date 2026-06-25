@@ -5,11 +5,12 @@
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
     <img src="docs/logo-light.svg" alt="Alchemist Template" width="520">
   </picture>
-  <p><strong>A production-grade SaaS template, built so AI agents can extend it without breaking it.</strong></p>
+  <p><strong>The Alchemist MCP-server starter template — a headless Deno + Hono backend exposing an MCP server at `/api/mcp`.</strong></p>
   <p>
     <a href="#quick-start">Quick Start</a> &#8226;
     <a href="#whats-in-the-box">What's in the Box</a> &#8226;
     <a href="#architecture">Architecture</a> &#8226;
+    <a href="#mcp-server-at-apimcp">MCP Server</a> &#8226;
     <a href="#customizing-for-your-product">Customizing</a> &#8226;
     <a href="#working-with-ai-agents">Agents</a> &#8226;
     <a href="#license">License</a>
@@ -18,14 +19,16 @@
 
 ---
 
-Alchemist Template (MCP-server edition) is a headless Deno 2 + Hono 4 starter whose primary surface is a **Model Context Protocol server at `/api/mcp`**. It ships with a tool registry, an example `echo` tool, auth, billing, RBAC, structured logging, and an idiomatic Kysely + services layout, plus a `CLAUDE.md` authored so AI agents (Claude Code, Cursor, or the [Alchemist AI](https://adaas.dev) platform itself) can navigate and extend it without fighting the conventions. Fork it as the starting point for any MCP-native product.
+This is the **Alchemist MCP-server starter template**: a headless Deno 2 + Hono 4 backend whose primary surface is a **Model Context Protocol server at `/api/mcp`**. It is selected by Alchemist Cloud's `create_project(template_key='mcp-server')` and ships with a working tool registry plus an example `echo` tool, so generated projects start from a functioning, extensible MCP server.
 
-It is also the seed repo every customer project on the [Alchemist AI](https://adaas.dev) platform is cloned from. The conventions here are the ones autonomous agents are trained against -- using this template means agents work with you, not around you.
+It ships with auth, billing, RBAC, structured logging, and an idiomatic Kysely + services layout, plus a `CLAUDE.md` authored so AI agents (Claude Code, Cursor, or the [Alchemist AI](https://adaas.dev) platform itself) can navigate and extend it without fighting the conventions. Fork it as the starting point for any new MCP-powered product.
+
+It is also the seed repo every customer project on the [Alchemist AI](https://adaas.dev) platform is cloned from when `template_key='mcp-server'`. The conventions here are the ones autonomous agents are trained against -- using this template means agents work with you, not around you.
 
 ## What's in the box
 
-- **MCP server** -- Model Context Protocol endpoint at `/api/mcp`. Streamable HTTP transport, stateless per-request mode, a tool-registry abstraction, and an `echo` example tool. Add tools in `src/mcp/tools/`. See [`docs/mcp-server.md`](docs/mcp-server.md).
-- **API** -- Deno 2 + Hono 4 with Zod request validation and typed error handling. No frontend is served — the MCP endpoint and the `/api/*` REST routes are the entire surface.
+- **MCP server** -- Model Context Protocol endpoint at `/api/mcp`, built on `@modelcontextprotocol/sdk` (bare specifier). Streamable HTTP transport, stateless per-request mode, a tool-registry abstraction, and an `echo` example tool. Add tools in `src/mcp/tools/`. See [`docs/mcp-server.md`](docs/mcp-server.md).
+- **API** -- Deno 2 + Hono 4 with Zod request validation and typed error handling. No frontend is served — the MCP endpoint and the `/api/*` REST routes (auth, billing, files, etc.) are the entire surface.
 - **Database** -- PostgreSQL via Kysely with `CamelCasePlugin` (camelCase in TS, snake_case in SQL). Migrations are plain SQL files in `db/migrations/`, auto-applied on startup.
 - **Cache + sessions** -- Redis, with helpers for rate limits and key-scoped invalidation.
 - **Auth** -- Email OTP login, session cookies, JWT for API tokens, OAuth providers via Arctic 2. Includes a documented dev-login escape hatch so local + agent testing works without an SMTP inbox.
@@ -42,21 +45,21 @@ It is also the seed repo every customer project on the [Alchemist AI](https://ad
 ```
 MCP Client (Claude Desktop, CLI plugin, IDE, Inspector)
    |
-   v  POST /api/mcp  (Streamable HTTP, SSE response)
+   v  POST/GET/DELETE /api/mcp  (Streamable HTTP, SSE response)
 Hono 4 API                (src/api/routes/mcp/  +  src/api/routes/*)
    |   Origin guard, MCP JSON-RPC dispatch, Zod-validated REST
    v
-src/mcp/                  (tool registry + server factory + tool modules)
+src/mcp/                  (tool registry + createMcpServer factory + tool modules)
    |
    v
-PostgreSQL                (Kysely, NNN_*.sql migrations auto-applied)
+PostgreSQL                        (Kysely, NNN_*.sql migrations auto-applied)
    +
-Redis                     (sessions, cache, rate limits)
+Redis                             (sessions, cache, rate limits)
    +
-Stripe                    (subscriptions, credits, customer portal)
+Stripe                            (subscriptions, credits, customer portal)
 ```
 
-**Stack:** Deno 2, Hono 4, @modelcontextprotocol/sdk, Kysely 0.27, PostgreSQL, Redis, Arctic 2, Stripe 17, Zod 3, nodemailer 6.
+**Stack:** Deno 2, Hono 4, `@modelcontextprotocol/sdk` (bare specifier), Kysely 0.27, PostgreSQL, Redis, Arctic 2, Stripe 17, Zod 3, nodemailer 6.
 
 ## Quick start
 
@@ -68,16 +71,17 @@ cd my-app
 ./scripts/setup.sh
 ```
 
-`setup.sh` checks your toolchain (Deno, Docker), installs the SPA dependencies, brings up Postgres + Redis via `docker-compose`, and runs all migrations.
+`setup.sh` checks your toolchain (Deno, Docker), brings up Postgres + Redis via `docker-compose`, and runs all migrations.
 
 ### 2. Start the dev stack
 
 ```bash
-./scripts/dev.sh --api-port 8000 --port 5173
+./scripts/dev.sh --api-port 8000
 ```
 
 This starts the Hono API on `:8000`. There is no Vite SPA in this template — the
-MCP endpoint and `/api/*` routes are the entire surface.
+MCP endpoint and `/api/*` routes are the entire surface. The MCP server is
+available at `http://localhost:8000/api/mcp`.
 
 ### 3. Smoke-test the MCP server
 
@@ -104,7 +108,64 @@ curl -X POST -H 'Content-Type: application/json' \
 # Re-use the cookie jar with -b /tmp/jar.txt on subsequent requests.
 ```
 
-The `/api/dev/*` routes 404 when `NODE_ENV=production` -- local-only by construction.
+The `/api/dev/*` routes 404 unless `ALCHEMIST_DEV_ROUTES` is set (it's wired into `deno task dev`; production never sets it) -- the surface is local-only by construction.
+
+## MCP server at `/api/mcp`
+
+The primary surface is an MCP (Model Context Protocol) server mounted at `/api/mcp`. It is served over Streamable HTTP using the MCP TypeScript SDK's `WebStandardStreamableHTTPServerTransport`, which takes a web-standard `Request` and returns a `Response`. The transport runs in **stateless mode** (`sessionIdGenerator: undefined`) — a fresh `McpServer` + transport is created per request.
+
+- `POST /api/mcp` — `initialize` handshake and tool-call JSON-RPC bodies.
+- `GET /api/mcp` — SSE streams (when a session-aware transport is used).
+- `DELETE /api/mcp` — session teardown.
+
+The route handler (`src/api/routes/mcp/index.ts`) validates the `Origin` header (DNS-rebinding / CSRF guard), then calls `createMcpServer()` (`src/mcp/server.ts`), which builds an `McpServer` from the tool registry. Tools live in `src/mcp/tools/` and self-register at import time. See [`docs/mcp-server.md`](docs/mcp-server.md) for the full design record (transport, security, dual mount).
+
+### Add a new MCP tool
+
+1. Create a tool module under `src/mcp/tools/` that calls `registerMcpTool(...)` at module top-level. `inputSchema` is a raw Zod shape (`ZodRawShape`), NOT `z.object({...})`:
+
+```ts
+// src/mcp/tools/greet.ts
+import { z } from "zod";
+import { registerMcpTool } from "@/mcp/registry.ts";
+
+registerMcpTool({
+  name: "greet",
+  description: "Return a friendly greeting.",
+  inputSchema: {
+    name: z.string().min(1).describe("Who to greet"),
+  },
+  handler: async (args) => {
+    const name = String(args.name ?? "");
+    return { content: [{ type: "text", text: `Hello, ${name}!` }] };
+  },
+});
+```
+
+2. Add a side-effect import so the module runs (and registers the tool) when the server is built — `createMcpServer()` reads the registry via `listMcpTools()`:
+
+```ts
+// src/mcp/server.ts
+import "@/mcp/tools/echo.ts";
+import "@/mcp/tools/greet.ts"; // <- add this line
+```
+
+3. Restart the dev server and verify:
+
+```bash
+curl -X POST http://localhost:8000/api/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {}
+  }'
+```
+
+You should see your tool in the `tools` array.
+
+**Bare specifier rule:** Import the MCP SDK as `@modelcontextprotocol/sdk/...` (mapped in `deno.json` to `npm:@modelcontextprotocol/sdk`). Never inline `npm:`, `jsr:`, or `https:` prefixes in source -- the `no-import-prefix` lint rule will fail CI. Sub-path imports require `.js` extensions (ESM requirement).
 
 ## Project structure
 
@@ -145,10 +206,14 @@ CLAUDE.md          project context for AI agents
 This template is intentionally generic. The path from clone to "your product" is:
 
 1. **Rewrite `CLAUDE.md`.** Replace the `[Project Name]` header and `[Brief description...]` paragraph with what you're actually building. This is the file every AI agent reads first -- get it right and agents need almost no orientation. See [working with AI agents](#working-with-ai-agents) below.
+
 2. **Centralize brand in `src/config/brand.ts`.** App name and transactional email address -- the template reads from one place so there are no string-literal leaks of "Alchemist" anywhere in your fork.
+
 3. **Add your schema.** Create migration files in `db/migrations/` following the `NNN_description.sql` convention. The runner applies them in order on startup. Update `src/db/schema.ts` with matching TypeScript types -- the `CamelCasePlugin` handles the case conversion at the DB boundary.
+
 4. **Add MCP tools.** Create a file in `src/mcp/tools/` that calls `registerMcpTool(...)` at module top-level, then add an `import "@/mcp/tools/my_tool.ts"` side-effect import in `src/mcp/server.ts`. See [`docs/mcp-server.md`](docs/mcp-server.md) for the full pattern and security notes.
-5. **Add REST routes + services.** Drop new files into `src/api/routes/` and mount them in `app.ts`. Put the logic in `src/services/`. Keep routes thin.
+
+5. **Add REST routes + services.** Drop new files into `src/api/routes/` and mount them in `app.ts` with `app.route("/api/...", yourRoutes)`. Put the logic in `src/services/`. Keep routes thin.
 
 The template ships with the foundation you'd otherwise build yourself: organizations, users, sessions, OAuth, OTP, Stripe customers + subscriptions, credit grants, user preferences, team invites. You shouldn't have to touch most of it -- just build your domain on top.
 
@@ -205,8 +270,6 @@ Mount the secrets, point at your databases, and run the image. A `/health` endpo
 ```bash
 docker-compose up
 ```
-
-For local end-to-end runs without the Vite dev server.
 
 ## Contributing
 
