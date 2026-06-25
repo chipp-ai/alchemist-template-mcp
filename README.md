@@ -200,7 +200,7 @@ This template is intentionally generic. The path from clone to "your product" is
 
 3. **Add your schema.** Create migration files in `db/migrations/` following the `NNN_description.sql` convention. The runner applies them in order on startup. Update `src/db/schema.ts` with matching TypeScript types -- the `CamelCasePlugin` handles the case conversion at the DB boundary.
 
-4. **Add routes + services.** Drop new files into `src/api/routes/` and mount them in `src/api/index.ts`. Put the logic in `src/services/`. Keep routes thin.
+4. **Add routes + services.** Drop new files into `src/api/routes/` and mount them in `app.ts` with `app.route("/api/...", yourRoutes)`. Put the logic in `src/services/`. Keep routes thin.
 
 5. **Add an MCP tool to `src/mcp` registry.** Create a module under `src/mcp/tools/`, implement with `server.registerTool(name, { description, inputSchema: z.object({...}) }, handler)`, and register it from the central registry. See the [MCP server section](#mcp-server-at-apimcp) for the full recipe.
 
