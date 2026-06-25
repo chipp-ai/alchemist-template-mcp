@@ -56,7 +56,12 @@ function allowedOrigins(): Set<string> {
  */
 function isOriginAllowed(req: Request): boolean {
   const origin = req.headers.get("origin");
-  if (!origin) return true; // non-browser MCP client
+  // No Origin header AT ALL → non-browser MCP client (Claude Desktop, IDE/CLI
+  // plugins, Inspector proxy). An EMPTY Origin value ("Origin:") is NOT the
+  // same as an absent header — it is still a present Origin, so it must be
+  // treated as a (disallowed-by-default) browser origin rather than waved
+  // through. `headers.get` returns null only when the header is truly absent.
+  if (origin === null) return true;
   return allowedOrigins().has(origin.toLowerCase());
 }
 

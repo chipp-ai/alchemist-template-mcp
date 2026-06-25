@@ -187,6 +187,29 @@ deno("mcp: rejects a cross-site browser Origin (DNS rebinding / CSRF guard)", as
   assertEquals(text.includes("attack"), false, "tool must not execute for a rejected origin");
 });
 
+deno("mcp: rejects an empty Origin header (present but blank, not the same as absent)", async () => {
+  // An empty Origin value is a PRESENT header, not an absent one. The guard
+  // must not confuse "Origin:" (blank) with a no-Origin Node client and wave
+  // it through — that would defeat the stated "Origin present → allowlist only"
+  // contract. With no allowlist configured, a blank Origin is rejected (403).
+  const headers = new Headers({
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+  });
+  headers.set("origin", "");
+  const callBody = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "echo", arguments: { message: "attack" } },
+  });
+
+  const res = await app.request("/api/mcp", { method: "POST", headers, body: callBody });
+  const text = await res.text();
+  assertEquals(res.status, 403, "blank Origin must be rejected, not treated as absent");
+  assertEquals(text.includes("attack"), false, "tool must not execute for a blank origin");
+});
+
 deno("mcp: no Origin header (real MCP client) is allowed through", async () => {
   // Non-browser MCP clients (Claude Desktop, IDE/CLI plugins, Inspector proxy)
   // send NO Origin header. The guard must let them through unchanged.
