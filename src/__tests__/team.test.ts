@@ -38,6 +38,16 @@ function deno(name: string, fn: () => void | Promise<void>) {
   Deno.test({ name, sanitizeResources: false, sanitizeOps: false, fn });
 }
 
+async function hasWebDir(): Promise<boolean> {
+  try {
+    const dir = new URL("../../web/", import.meta.url);
+    await Deno.stat(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Role hierarchy ────────────────────────────────────────────────────────
 
 deno("hierarchy: ranks are strictly descending owner > admin > editor > viewer", () => {
@@ -178,6 +188,11 @@ deno("registry: ASSIGNABLE_ROLES excludes 'owner' (invite-can-never-confer-owner
 // ── Client mirror lint ────────────────────────────────────────────────────
 
 deno("client mirror: web/src/lib/permissions.ts has the same capability list", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — client permissions
+    // mirror is not applicable.
+    return;
+  }
   // Both the server (lib/roles.ts) and client (web/src/lib/permissions.ts)
   // declare CAPABILITIES. They MUST be identical — drift means an
   // admin button shows in the UI but the API returns 403.
@@ -287,6 +302,10 @@ deno("source: migration 003 adds 'editor' enum value + backfills 'member'", asyn
 });
 
 deno("source: routes.ts wires /invite/:token + isPublicRoute prefix-matches it", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — no routes.ts SPA router.
+    return;
+  }
   const src = await Deno.readTextFile(
     new URL("../../web/src/routes.ts", import.meta.url),
   );
@@ -310,6 +329,10 @@ deno("source: routes.ts wires /invite/:token + isPublicRoute prefix-matches it",
 });
 
 deno("source: Settings.svelte renders pending invites + role-update dropdowns", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — no Settings.svelte.
+    return;
+  }
   const src = await Deno.readTextFile(
     new URL("../../web/src/routes/Settings.svelte", import.meta.url),
   );

@@ -35,6 +35,16 @@ function deno(name: string, fn: () => void | Promise<void>) {
   Deno.test({ name, sanitizeResources: false, sanitizeOps: false, fn });
 }
 
+async function hasWebDir(): Promise<boolean> {
+  try {
+    const dir = new URL("../../web/", import.meta.url);
+    await Deno.stat(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── dev-activity ring buffer ───────────────────────────────────────────────
 
 deno("ring: recordRequest appends most-recent-first", () => {
@@ -114,6 +124,10 @@ deno("ring: getRecentRequests returns a fresh array (caller can't mutate)", () =
 // ── Source-shape lints (the load-bearing convention) ──────────────────────
 
 deno("source: every web/src/stores/*.svelte.ts uses defineStore", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   const dir = new URL("../../web/src/stores/", import.meta.url);
   const stores: string[] = [];
   for await (const entry of Deno.readDir(dir)) {
@@ -159,6 +173,10 @@ deno("source: every web/src/stores/*.svelte.ts uses defineStore", async () => {
 });
 
 deno("source: web/src/main.ts calls initDevPanel before mounting App", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   const src = await Deno.readTextFile(
     new URL("../../web/src/main.ts", import.meta.url),
   );
@@ -183,6 +201,10 @@ deno("source: web/src/main.ts calls initDevPanel before mounting App", async () 
 });
 
 deno("source: web/src/App.svelte mounts <DevPanel />", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   const src = await Deno.readTextFile(
     new URL("../../web/src/App.svelte", import.meta.url),
   );
@@ -196,7 +218,7 @@ deno("source: web/src/App.svelte mounts <DevPanel />", async () => {
   }
 });
 
-deno("source: app.ts mounts recentActivityMiddleware gated on non-prod", async () => {
+deno("source: app.ts mounts recentActivityMiddleware gated on devRoutesEnabled", async () => {
   const src = await Deno.readTextFile(
     new URL("../../app.ts", import.meta.url),
   );
@@ -206,18 +228,22 @@ deno("source: app.ts mounts recentActivityMiddleware gated on non-prod", async (
         "has request/error history to surface.",
     );
   }
-  // Verify the production gate is on the registration (defense-in-depth
-  // even though the dev routes themselves are also production-gated).
-  if (!src.includes('Deno.env.get("NODE_ENV") !== "production"')) {
+  // Verify the gate uses the fail-closed devRoutesEnabled (ALCHEMIST_DEV_ROUTES)
+  // rather than the old NODE_ENV !== "production" check.
+  if (!src.includes("devRoutesEnabled()")) {
     throw new Error(
-      "app.ts must gate recentActivityMiddleware on NODE_ENV !== \"production\". " +
+      "app.ts must gate recentActivityMiddleware on devRoutesEnabled() (ALCHEMIST_DEV_ROUTES). " +
         "The ring buffer is harmless but accumulating customer-facing " +
-        "request metadata in production memory is unnecessary.",
+        "request metadata unless dev routes are explicitly enabled is unnecessary.",
     );
   }
 });
 
 deno("source: no $effect-on-mount loops in *.svelte components (live-bug regression guard)", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   // Live test caught a pre-existing template bug: components used
   //   $effect(() => { someStore.fetchSomething(); })
   // for one-shot mount-time side effects. Synchronously writing to a
@@ -287,6 +313,10 @@ deno("source: no $effect-on-mount loops in *.svelte components (live-bug regress
 });
 
 deno("source: push pipeline doesn't dedup on shallow signature (live-bug regression guard)", async () => {
+  if (!(await hasWebDir())) {
+    // Headless template (MCP-server) has no web/ SPA — skip this SPA convention check.
+    return;
+  }
   // Earlier the push pipeline computed a "shallow signature" of
   // {route, storeOrder, viewport} to skip pushes that looked
   // unchanged. That signature excluded actual store CONTENTS — so
