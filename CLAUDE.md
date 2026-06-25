@@ -341,3 +341,5 @@ After ANY correction from the user, **immediately** update this `CLAUDE.md` with
 - **date-fns 3: no default export** -- `import { format } from "date-fns"`
 - **Bare specifiers required** -- never inline `npm:`, `jsr:`, or `https:` in source; declare in `deno.json`
 - **MCP transport owns the body** -- do not pre-parse the Request before passing to `StreamableHTTPServerTransport`
+- **Dev-routes tests: use `ALCHEMIST_DEV_ROUTES=1`, not `NODE_ENV`** -- the guard is fail-closed on that env var; tests that exercise `/api/dev/*` must set it for their own duration with a `try/finally` restore
+- **`APP_URL` is the canonical server base URL** -- used for OAuth callbacks and Stripe return URLs (replaces the old `WEB_APP_URL`); default is `http://localhost:8000`; set it to the deployed origin in production
