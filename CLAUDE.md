@@ -21,11 +21,11 @@ All references to `__API_PORT__` in docs mean **your** API port from the file ab
 
 **Hit the API at `http://localhost:__API_PORT__`.** No Vite/SPA in this template.
 
-**Dev login (local testing):** there is no SMTP / inbox harness in dev, so the email-OTP code never reaches an inbox — sign-in via the OTP form will always block. Two well-lit escape hatches:
+**Dev login (local testing):** there is no SMTP / inbox harness in dev, so the email-OTP code never reaches an inbox — sign-in via the OTP form will always block. Use the dev-login escape hatch:
 
 - **From an agent or terminal**, `curl -X POST -H 'Content-Type: application/json' -d '{"email":"agent@dev.local"}' http://localhost:__API_PORT__/api/dev/login -c /tmp/jar.txt` issues the same session. Re-use the cookie jar with `-b /tmp/jar.txt` on subsequent requests.
 
-The `/api/dev/*` routes 404 when `NODE_ENV=production` -- both surfaces are local-only by construction. See "Dev affordances" further down for the full route catalog (seed / reset / introspect).
+The `/api/dev/*` routes 404 unless `ALCHEMIST_DEV_ROUTES` is set (it's wired into `deno task dev`; production never sets it) -- the surface is local-only by construction. See "Dev affordances" further down for the full route catalog (seed / reset / introspect).
 
 ## Architecture
 
@@ -96,9 +96,10 @@ export function registerHelloTool(server: McpServer) {
     "hello",
     {
       description: "Return a friendly greeting.",
-      inputSchema: z.object({
+      // inputSchema is a raw Zod shape (ZodRawShape), NOT z.object({...}).
+      inputSchema: {
         name: z.string().min(1),
-      }),
+      },
     },
     async ({ name }) => ({
       content: [{ type: "text", text: `Hello, ${name}!` }],
@@ -492,9 +493,9 @@ Skipping the cheaper tools is the most common token-waster in verification — a
 
 ## Dev affordances — DO NOT reverse-engineer auth from scratch
 
-When NODE_ENV is anything other than `production` (which is the case in
-the local dev stack AND inside the agent's E2B sandbox), the platform
-mounts a small set of **dev-only routes** at `/api/dev/*` so you can
+When `ALCHEMIST_DEV_ROUTES` is set (it's wired into `deno task dev`, so
+it's on in the local dev stack AND inside the agent's E2B sandbox), a
+small set of **dev-only routes** at `/api/dev/*` go live so you can
 verify auth-gated flows without driving the OTP send + email + verify
 cycle. SMTP is not configured in the sandbox, so the OTP email goes to
 console — agents that try to verify the signup flow without these
@@ -587,10 +588,13 @@ curl -sS -X POST -H 'Content-Type: application/json' \
 ### Production safety
 
 The whole dev router is wrapped in a guard middleware that throws
-`NotFoundError` when `NODE_ENV === "production"`. The deployed
-customer pod always has `NODE_ENV=production` (set by the rollout
-controller) so the routes return 404 the same as if they had never
-been registered. Don't remove this guard — the routes bypass auth.
+`NotFoundError` unless `devRoutesEnabled()` (the fail-closed
+`ALCHEMIST_DEV_ROUTES` flag in `src/lib/dev-mode.ts`) is set. The
+deployed customer pod never sets `ALCHEMIST_DEV_ROUTES`, so the routes
+return 404 the same as if they had never been registered. (This
+positive opt-in replaced an older fail-open `NODE_ENV !== "production"`
+check, which exposed the routes on any pod whose env wiring was
+incomplete.) Don't remove this guard — the routes bypass auth.
 
 ## Library version idioms — fight your training-data defaults
 
@@ -637,14 +641,14 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 ```
 
-Tool registration uses `registerTool` (current stable), not the deprecated `.tool()`:
+Tool registration uses `registerTool` (current stable), not the deprecated `.tool()`. `inputSchema` is a raw Zod shape (`ZodRawShape`) — a plain object of field→Zod validators — NOT a wrapped `z.object({...})` (the SDK wraps it for you). Passing `z.object(...)` type-errors under `strict` and breaks validation at runtime:
 
 ```ts
 server.registerTool(
   "my_tool",
   {
     description: "...",
-    inputSchema: z.object({ name: z.string() }),
+    inputSchema: { name: z.string() }, // raw shape, not z.object({ ... })
   },
   async (args) => ({ content: [{ type: "text", text: "..." }] }),
 );
@@ -718,5 +722,6 @@ This section grows as mistakes are discovered. Check it before writing code.
 - **date-fns 3: no default export** -- `import { format } from "date-fns"`, not `import dateFns from "date-fns"`
 - **Stripe 17: pin `apiVersion` on the client** -- SDK major and API version must agree
 - **MCP SDK: use `registerTool`, not `.tool()`** -- `.tool()` is deprecated
+- **MCP `inputSchema` is a raw Zod shape** -- `{ name: z.string() }`, NOT `z.object({ name: z.string() })` (the SDK wraps it; passing `z.object(...)` breaks validation)
 - **MCP sub-imports need `.js` extension** -- `@modelcontextprotocol/sdk/server/mcp.js`, not without `.js`
 - **Bare specifiers only** -- never inline `npm:`, `jsr:`, or `https:` in source (no-import-prefix lint)

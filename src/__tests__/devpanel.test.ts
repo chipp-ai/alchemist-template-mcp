@@ -12,14 +12,16 @@
  *     populate the store)
  *   - POST /api/dev/app-state: stores the client snapshot for
  *     subsequent GETs
- *   - Production gate: dev routes self-404 when NODE_ENV=production
+ *   - Production gate: dev routes self-404 unless devRoutesEnabled()
+ *     (the fail-closed ALCHEMIST_DEV_ROUTES flag) is set
  *
- * Source-shape lints:
+ * Source-shape lints (SPA lints no-op on the headless MCP-server
+ * template, which has no web/ dir — guarded by hasWebDir()):
  *   - Every store file in web/src/stores/ uses `defineStore` (the
  *     load-bearing convention that makes the dev panel work)
  *   - `App.svelte` mounts `<DevPanel />`
  *   - `main.ts` calls `initDevPanel()`
- *   - `app.ts` mounts `recentActivityMiddleware` gated on NODE_ENV
+ *   - `app.ts` mounts `recentActivityMiddleware` gated on devRoutesEnabled()
  */
 
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
@@ -30,19 +32,10 @@ import {
   recordError,
   recordRequest,
 } from "@/lib/dev-activity.ts";
+import { hasWebDir } from "./helpers.ts";
 
 function deno(name: string, fn: () => void | Promise<void>) {
   Deno.test({ name, sanitizeResources: false, sanitizeOps: false, fn });
-}
-
-async function hasWebDir(): Promise<boolean> {
-  try {
-    const dir = new URL("../../web/", import.meta.url);
-    await Deno.stat(dir);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // ── dev-activity ring buffer ───────────────────────────────────────────────

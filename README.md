@@ -120,9 +120,10 @@ export function registerHelloTool(server: McpServer) {
     "hello",
     {
       description: "Return a friendly greeting.",
-      inputSchema: z.object({
+      // inputSchema is a raw Zod shape (ZodRawShape), NOT z.object({...}).
+      inputSchema: {
         name: z.string().min(1),
-      }),
+      },
     },
     async ({ name }) => ({
       content: [{ type: "text", text: `Hello, ${name}!` }],
@@ -202,7 +203,7 @@ This template is intentionally generic. The path from clone to "your product" is
 
 4. **Add routes + services.** Drop new files into `src/api/routes/` and mount them in `app.ts` with `app.route("/api/...", yourRoutes)`. Put the logic in `src/services/`. Keep routes thin.
 
-5. **Add an MCP tool to `src/mcp` registry.** Create a module under `src/mcp/tools/`, implement with `server.registerTool(name, { description, inputSchema: z.object({...}) }, handler)`, and register it from the central registry. See the [MCP server section](#mcp-server-at-apimcp) for the full recipe.
+5. **Add an MCP tool to `src/mcp` registry.** Create a module under `src/mcp/tools/`, implement with `server.registerTool(name, { description, inputSchema: { /* raw Zod shape */ } }, handler)`, and register it from the central registry. See the [MCP server section](#mcp-server-at-apimcp) for the full recipe.
 
 The template ships with the foundation you'd otherwise build yourself: organizations, users, sessions, OAuth, OTP, Stripe customers + subscriptions, credit grants, user preferences, team invites. You shouldn't have to touch most of it -- just build your domain on top.
 

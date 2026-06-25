@@ -33,19 +33,10 @@ import {
   roleLabel,
   type Capability,
 } from "@/lib/roles.ts";
+import { hasWebDir } from "./helpers.ts";
 
 function deno(name: string, fn: () => void | Promise<void>) {
   Deno.test({ name, sanitizeResources: false, sanitizeOps: false, fn });
-}
-
-async function hasWebDir(): Promise<boolean> {
-  try {
-    const dir = new URL("../../web/", import.meta.url);
-    await Deno.stat(dir);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // ── Role hierarchy ────────────────────────────────────────────────────────
