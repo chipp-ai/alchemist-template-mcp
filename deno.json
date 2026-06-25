@@ -37,7 +37,8 @@
     "stripe": "npm:stripe@^17.0.0",
     "jose": "npm:jose@^5.0.0",
     "date-fns": "npm:date-fns@^3.0.0",
-    "nodemailer": "npm:nodemailer@^6.0.0"
+    "nodemailer": "npm:nodemailer@^6.0.0",
+    "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.0.0"
   },
   "compilerOptions": {
     "strict": true,

@@ -27,6 +27,7 @@ import { realtimeRoutes } from "@/api/routes/realtime/index.ts";
 import { observabilityRoutes } from "@/api/routes/observability/index.ts";
 import { docsRoutes } from "@/api/routes/docs/index.ts";
 import { devRoutesEnabled } from "@/lib/dev-mode.ts";
+import { mcpRoutes } from "@/api/routes/mcp/index.ts";
 
 // ── App types ──
 
@@ -137,11 +138,15 @@ app.route("/api/dev", devRoutes);
 // src/observability/envelope.ts.
 app.route("/api/_observability", observabilityRoutes);
 
+// MCP server over Streamable HTTP (Model Context Protocol).
+// Mounted at /api/mcp. See src/api/routes/mcp/index.ts and src/mcp/.
+app.route("/api/mcp", mcpRoutes);
+
 // ── MCP-server template (headless) ──
 // This template serves NO frontend. There is no web/ SPA and no static
 // file serving. The MCP server endpoints + the /api/* routes above are
-// the surface; unmatched paths fall through to the JSON 404 below. The
-// MCP server itself is added in a follow-on (src/mcp + an /api/mcp route).
+// the surface; unmatched paths fall through to the JSON 404 below.
+// The MCP server is mounted at /api/mcp (see src/api/routes/mcp).
 
 // ── Global error handler ──
 
