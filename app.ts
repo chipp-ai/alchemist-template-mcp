@@ -26,6 +26,7 @@ import { inviteRoutes } from "@/api/routes/invite/index.ts";
 import { realtimeRoutes } from "@/api/routes/realtime/index.ts";
 import { observabilityRoutes } from "@/api/routes/observability/index.ts";
 import { docsRoutes } from "@/api/routes/docs/index.ts";
+import { mcpRoutes } from "@/api/routes/mcp/index.ts";
 import { devRoutesEnabled } from "@/lib/dev-mode.ts";
 
 // ── App types ──
@@ -136,6 +137,10 @@ app.route("/api/dev", devRoutes);
 // NODE_ENV doesn't break the SPA's breadcrumb POSTs with 404s. See
 // src/observability/envelope.ts.
 app.route("/api/_observability", observabilityRoutes);
+
+// MCP server over HTTP (stateless). Mounted before the static SPA fallback
+// so /api/mcp is handled by the MCP transport, not swallowed by serveStatic.
+app.route("/api/mcp", mcpRoutes);
 
 // ── Static SPA ──
 // Serves the Svelte frontend built in the Dockerfile's web-builder stage
