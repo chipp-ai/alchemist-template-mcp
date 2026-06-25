@@ -94,7 +94,7 @@ There's no SMTP harness in dev, so OTP codes never reach an inbox. Use the dev-l
   ```
   Re-use the cookie jar with `-b /tmp/jar.txt` on subsequent requests.
 
-The `/api/dev/*` routes 404 when `NODE_ENV=production` -- the surface is local-only by construction.
+The `/api/dev/*` routes 404 unless `ALCHEMIST_DEV_ROUTES` is set (it's wired into `deno task dev`; production never sets it) -- the surface is local-only by construction.
 
 ## MCP server at `/api/mcp`
 
@@ -104,7 +104,7 @@ The primary surface is an MCP (Model Context Protocol) server mounted at `POST/G
 - `GET /api/mcp` for SSE streams (when supported by the transport).
 - `DELETE /api/mcp` for session teardown.
 
-Tools are registered via a central registry under `src/mcp`. The server implementation (route + transport wiring) is added by the parallel `mcpserver` work; this template provides the registry shape so projects start ready to extend.
+Tools are registered via a central registry under `src/mcp`. The route handler at `/api/mcp` wires up `StreamableHTTPServerTransport` and delegates all JSON-RPC calls to the registry; extend the server by adding tool modules and registering them.
 
 ### Add a new MCP tool
 

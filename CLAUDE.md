@@ -185,7 +185,7 @@ exposes them via the `load_skill` tool). Add a new spoke by dropping a
 
 ## Observability stream — `.scratch/logs/observability.jsonl`
 
-Every server log statement, HTTP request, server error, AND every browser-side breadcrumb (console.*, errors, fetch/XHR, clicks, route changes, LCP/CLS/INP) converges in **time order** into a single JSONL file at `.scratch/logs/observability.jsonl`. This is the canonical "what happened during this test session" stream — read it after a user has poked at the app to understand exactly what they did, what fired, and what failed.
+Every server log statement, HTTP request, and server error converges in **time order** into a single JSONL file at `.scratch/logs/observability.jsonl`. This is the canonical "what happened during this test session" stream — read it after running an agent session to understand exactly what fired and what failed. (Client-side browser breadcrumbs are absent in this headless template — only `source: "server"` events are written.)
 
 Each line is `{ts, sid, source: "client"|"server", kind, data}`. Stable `kind` slugs (do NOT mutate; analytics product depends on them): `server.log.{debug,info,warn,error}`, `server.http`, `server.error`, `client.console.{log,info,warn,error,debug}`, `client.error`, `client.promise`, `client.fetch`, `client.click`, `client.click.background`, `client.route`, `client.perf.{lcp,cls,inp}`, `client.session`.
 
@@ -197,9 +197,7 @@ Implementation lives in:
 
 Dev-only — the entire pipeline no-ops when `NODE_ENV === "production"`. The analytics product will replace the collector with a remote ingest at that boundary when it ships.
 
-**When debugging a user-reported issue, tail this file first** — `tail -n 200 .scratch/logs/observability.jsonl | jq .` gives the most recent slice of what happened in their session, both client and server, in time order.
-
-(Note: client-side breadcrumbs are absent in this headless template; only server events are written.)
+**When debugging a reported issue, tail this file first** — `tail -n 200 .scratch/logs/observability.jsonl | jq .` gives the most recent slice of what happened in a session, in time order.
 
 ## API Conventions
 
