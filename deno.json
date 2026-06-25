@@ -64,7 +64,7 @@
         "no-control-regex"
       ]
     },
-    "exclude": ["web/", "tools/"]
+    "exclude": ["tools/"]
   },
   "nodeModulesDir": "none"
 }

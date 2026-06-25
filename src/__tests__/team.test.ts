@@ -5,13 +5,11 @@
  * Coverage:
  *   - Role hierarchy (rankOf, hasAtLeast, can, canManage)
  *   - Capability map exhaustiveness (every capability has a min-role
- *     entry; the server's lib/roles.ts and the client's
- *     web/src/lib/permissions.ts mirror each other exactly)
+ *     entry)
  *   - Invite token generator (uniqueness, URL-safety, length)
- *   - Source-shape lints:
+ *   - Source-shape lints (server only):
  *     - publicRoutes / isPublicRoute is wired so /invite/:token
  *       resolves as public
- *     - Settings.svelte renders pending invites + role dropdowns
  *     - app.ts mounts /api/invite
  *     - Migration 003 backfills 'member' → 'editor'
  *
@@ -175,34 +173,7 @@ deno("registry: ASSIGNABLE_ROLES excludes 'owner' (invite-can-never-confer-owner
   assertEquals(ASSIGNABLE_ROLES.includes("owner" as never), false);
 });
 
-// ── Client mirror lint ────────────────────────────────────────────────────
-
-deno("client mirror: web/src/lib/permissions.ts has the same capability list", async () => {
-  // Both the server (lib/roles.ts) and client (web/src/lib/permissions.ts)
-  // declare CAPABILITIES. They MUST be identical — drift means an
-  // admin button shows in the UI but the API returns 403.
-  const clientSrc = await Deno.readTextFile(
-    new URL("../../web/src/lib/permissions.ts", import.meta.url),
-  );
-  for (const cap of CAPABILITIES) {
-    if (!clientSrc.includes(`"${cap}"`)) {
-      throw new Error(
-        `Server has capability "${cap}" but client lib/permissions.ts ` +
-          `doesn't. Add it to both.`,
-      );
-    }
-  }
-  for (const role of ROLES) {
-    if (!clientSrc.includes(`"${role}"`)) {
-      throw new Error(
-        `Server has role "${role}" but client lib/permissions.ts doesn't. ` +
-          `Add it.`,
-      );
-    }
-  }
-});
-
-// ── Source-shape lints ────────────────────────────────────────────────────
+// ── Source-shape lints (server only) ──────────────────────────────────────
 
 deno("source: app.ts mounts /api/invite", async () => {
   const src = await Deno.readTextFile(
@@ -286,47 +257,4 @@ deno("source: migration 003 adds 'editor' enum value + backfills 'member'", asyn
   );
 });
 
-deno("source: routes.ts wires /invite/:token + isPublicRoute prefix-matches it", async () => {
-  const src = await Deno.readTextFile(
-    new URL("../../web/src/routes.ts", import.meta.url),
-  );
-  assertStringIncludes(
-    src,
-    `"/invite/:token": InviteAccept`,
-    "routes.ts must register /invite/:token → InviteAccept.svelte",
-  );
-  assertStringIncludes(
-    src,
-    `"/invite/"`,
-    "routes.ts must include /invite/ in PUBLIC_PREFIX_ROUTES so " +
-      "isPublicRoute(path) matches the actual path with a token",
-  );
-  assertStringIncludes(
-    src,
-    "export function isPublicRoute",
-    "routes.ts must export an isPublicRoute(path) function — " +
-      "publicRoutes.has(literal) doesn't work for parameterized routes",
-  );
-});
 
-deno("source: Settings.svelte renders pending invites + role-update dropdowns", async () => {
-  const src = await Deno.readTextFile(
-    new URL("../../web/src/routes/Settings.svelte", import.meta.url),
-  );
-  assertStringIncludes(
-    src,
-    `data-testid="settings-team-pending-invites"`,
-    "Settings.svelte must render the pending-invites list",
-  );
-  assertStringIncludes(
-    src,
-    `data-testid="settings-team-select-role-`,
-    "Settings.svelte must render per-member role dropdowns",
-  );
-  assertStringIncludes(
-    src,
-    "canManage(",
-    "Settings.svelte must use canManage() to gate role-edit + remove " +
-      "controls (admins can't manage other admins)",
-  );
-});

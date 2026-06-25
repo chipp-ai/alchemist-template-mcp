@@ -9,7 +9,6 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { compress } from "hono/compress";
 import { timing } from "hono/timing";
-import { serveStatic } from "hono/deno";
 import { AppError } from "@/utils/errors.ts";
 import { log } from "@/lib/logger.ts";
 import { requestTimingMiddleware } from "@/api/middleware/request-timing.ts";
@@ -136,27 +135,6 @@ app.route("/api/dev", devRoutes);
 // NODE_ENV doesn't break the SPA's breadcrumb POSTs with 404s. See
 // src/observability/envelope.ts.
 app.route("/api/_observability", observabilityRoutes);
-
-// ── Static SPA ──
-// Serves the Svelte frontend built in the Dockerfile's web-builder stage
-// (output goes to web/dist/). Mounted AFTER the API routes so /api/*
-// requests still hit their handlers, and BEFORE app.notFound so visiting
-// the customer URL in a browser returns the SPA shell instead of the
-// API's JSON 404 fallback.
-//
-// The SPA fallback (line 2 below) MUST exclude /api/* paths — Hono's
-// serveStatic with `path:` matches every unmatched route, so without
-// this gate it would intercept malformed API requests and return the
-// SPA shell with a 200 status, swallowing real 4xx/5xx from API
-// handlers. The first-line bare-asset serveStatic is already path-
-// scoped (only matches when web/dist/<path> exists), so it's safe.
-app.use("/*", serveStatic({ root: "./web/dist" }));
-app.use("/*", async (c, next) => {
-  // /api/* requests must NOT receive the SPA shell — they need to
-  // surface real 4xx/5xx + JSON bodies to the SPA fetch caller.
-  if (c.req.path.startsWith("/api/")) return next();
-  return serveStatic({ path: "./web/dist/index.html" })(c, next);
-});
 
 // ── Global error handler ──
 
