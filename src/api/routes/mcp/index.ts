@@ -7,6 +7,22 @@
  * transport is created per request. This is the simplest model for a
  * starter and avoids sticky session concerns.
  *
+ * Security — Origin validation (DNS rebinding / cross-site protection):
+ *   The MCP spec REQUIRES HTTP servers to validate the Origin header to
+ *   prevent DNS-rebinding attacks, where a malicious web page the victim
+ *   visits POSTs to the (often unauthenticated, sometimes localhost) MCP
+ *   endpoint from the victim's browser and invokes tools. The app's global
+ *   CORS reflects any origin with credentials, so without this guard any
+ *   web page could reach this endpoint cross-site.
+ *
+ *   Legitimate MCP clients (Claude Desktop, IDE/CLI plugins, the Inspector
+ *   proxy) are Node-based and send NO Origin header, so this guard does not
+ *   affect them: requests with no Origin pass through. Only browser-issued
+ *   cross-site requests (which always carry an Origin) are rejected unless
+ *   the origin is explicitly allowlisted via MCP_ALLOWED_ORIGINS
+ *   (comma-separated). Default allowlist is empty → all browser origins are
+ *   rejected, which is the correct posture for a headless server.
+ *
  * Wire-up (in app.ts):
  *   import { mcpRoutes } from "@/api/routes/mcp/index.ts";
  *   app.route("/api/mcp", mcpRoutes);
@@ -18,7 +34,46 @@ import { createMcpServer } from "@/mcp/server.ts";
 
 const mcpRoutes = new Hono();
 
+/**
+ * Parse the MCP_ALLOWED_ORIGINS env var into a normalized allowlist.
+ * Read per-request (negligible cost) so deploys/tests that set the env
+ * see it without a process restart.
+ */
+function allowedOrigins(): Set<string> {
+  const raw = Deno.env.get("MCP_ALLOWED_ORIGINS") ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((o) => o.trim().toLowerCase())
+      .filter((o) => o.length > 0),
+  );
+}
+
+/**
+ * Returns true if the request is allowed to reach the MCP server.
+ * - No Origin header → allowed (non-browser MCP client, the normal case).
+ * - Origin present → allowed only if it is in the configured allowlist.
+ */
+function isOriginAllowed(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  if (!origin) return true; // non-browser MCP client
+  return allowedOrigins().has(origin.toLowerCase());
+}
+
 mcpRoutes.all("/", async (c) => {
+  // Reject cross-site browser requests (DNS rebinding / CSRF) before doing
+  // any work. JSON-RPC-shaped error so MCP clients get a sensible body.
+  if (!isOriginAllowed(c.req.raw)) {
+    return c.json(
+      {
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Origin not allowed" },
+        id: null,
+      },
+      403,
+    );
+  }
+
   // Fresh server + transport per request (stateless mode)
   const server = createMcpServer();
   const transport = new WebStandardStreamableHTTPServerTransport({

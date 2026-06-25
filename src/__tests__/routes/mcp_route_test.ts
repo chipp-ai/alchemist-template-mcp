@@ -159,3 +159,58 @@ deno("mcp: real app mounts /api/mcp and /api/mcp/ (trailing slash), subpaths 404
   await sub.text();
   assertEquals(sub.status, 404, "subpaths under /api/mcp must not be routed to MCP");
 });
+
+deno("mcp: rejects a cross-site browser Origin (DNS rebinding / CSRF guard)", async () => {
+  // A browser-issued cross-site request always carries an Origin header. With
+  // no allowlist configured, the MCP endpoint must reject it (403) before the
+  // transport runs, so a malicious web page in the victim's browser cannot
+  // invoke MCP tools against this (unauthenticated) server.
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    origin: "https://evil.example.com",
+  };
+  const callBody = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "echo", arguments: { message: "attack" } },
+  });
+
+  const res = await app.request("/api/mcp", { method: "POST", headers, body: callBody });
+  const text = await res.text();
+  assertEquals(res.status, 403, "cross-site browser Origin must be rejected");
+  const json = JSON.parse(text) as Record<string, unknown>;
+  const error = json.error as Record<string, unknown> | undefined;
+  assertExists(error, "expected a JSON-RPC error body");
+  // The malicious echo payload must NOT round-trip — no tool ran.
+  assertEquals(text.includes("attack"), false, "tool must not execute for a rejected origin");
+});
+
+deno("mcp: no Origin header (real MCP client) is allowed through", async () => {
+  // Non-browser MCP clients (Claude Desktop, IDE/CLI plugins, Inspector proxy)
+  // send NO Origin header. The guard must let them through unchanged.
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+  };
+  const initBody = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "test", version: "0.0.1" },
+    },
+  });
+
+  const res = await app.request("/api/mcp", { method: "POST", headers, body: initBody });
+  const text = await res.text();
+  assertEquals(res.status, 200, "no-Origin client must reach the MCP server");
+  const match = text.match(/data:\s*(\{[\s\S]*\})/);
+  assertExists(match, "expected an SSE data frame");
+  const json = JSON.parse(match[1]) as Record<string, unknown>;
+  const serverInfo = (json.result as Record<string, unknown>).serverInfo as Record<string, unknown>;
+  assertEquals(serverInfo.name, "alchemist-mcp-server");
+});
