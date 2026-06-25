@@ -102,6 +102,31 @@ learn the existence of B's data.
 
 ---
 
+## 11. MCP HTTP transport — DNS rebinding and cross-site invocation
+
+Applies to any endpoint that serves a Model Context Protocol (MCP) Streamable
+HTTP transport.
+
+- **Signal:** `WebStandardStreamableHTTPServerTransport` (or any MCP transport)
+  constructed without Origin validation; the app's global CORS reflects any
+  origin with credentials.
+- **Why it matters:** MCP servers are commonly unauthenticated (they rely on the
+  network boundary, not user identity). A malicious web page in a victim's
+  browser can POST to `http://localhost:PORT/api/mcp` — the canonical DNS-
+  rebinding target — and invoke any exposed tool. The MCP spec explicitly
+  requires HTTP servers to validate the `Origin` header for this reason.
+- **Fix:** In the MCP route handler, before doing any transport work:
+  - If the request has **no `Origin` header** → allow (real MCP clients —
+    Claude Desktop, CLI plugins, the Inspector proxy — are Node-based and send
+    no Origin).
+  - If the request has an `Origin` header → reject with a JSON-RPC-shaped 403
+    unless the origin is in an explicit allowlist (`MCP_ALLOWED_ORIGINS` env
+    var, comma-separated, default empty).
+- **See:** `src/api/routes/mcp/index.ts` (`isOriginAllowed`) and
+  `docs/mcp-server.md` for the reference implementation and rationale.
+
+---
+
 ## What is NOT this pass's job
 
 - Performance, style, test coverage — that's the review pass.

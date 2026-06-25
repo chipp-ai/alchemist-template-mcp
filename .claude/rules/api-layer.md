@@ -66,6 +66,40 @@ Protected routes use `requireAuth` middleware, which populates
 `requireCapability("...")`. Both live in `src/api/middleware/auth.ts` —
 see the `auth` rule for the role hierarchy + capability set.
 
+## MCP route — exceptions to these conventions
+
+The MCP server at `/api/mcp` (`src/api/routes/mcp/index.ts`) is a sanctioned
+exception to several rules above:
+
+- **No `zValidator` / `validationHook`.** The SDK handles JSON-RPC parsing and
+  validation internally.
+- **No `{data}/{error}` envelope.** The route returns the raw `Response` from
+  the SDK transport (SSE body, `text/event-stream`), which is the MCP wire
+  format. Standard envelope does not apply.
+- **No `requireAuth` by default.** The endpoint is intentionally public for the
+  starter. Add auth when adding tools that access sensitive data.
+- **Origin guard is the CSRF control.** The route validates the `Origin` header
+  (see DNS-rebinding note in the security checklist). No Hono-level CSRF
+  middleware applies.
+
+### Hono sub-router trailing-slash pitfall
+
+Hono's strict route matching does NOT treat `/api/mcp` and `/api/mcp/` as
+equivalent. If you mount only `app.route("/api/mcp", sub)`, then requests to
+`/api/mcp/` fall through to the 404. Clients and proxies that normalize
+configured URLs to a trailing slash will see confusing 404s.
+
+**Fix:** mount the sub-router at both forms:
+
+```ts
+app.route("/api/mcp", mcpRoutes);
+app.route("/api/mcp/", mcpRoutes);
+```
+
+Do NOT use `sub.all("*", …)` inside the sub-router — that swallows subpaths
+(`/api/mcp/foo`) which should 404. Do NOT set `strict: false` on the top-level
+app — that changes trailing-slash semantics for all existing routes.
+
 ## Realtime / WebSockets
 
 The template ships a working WS surface so customer apps don't plumb auth

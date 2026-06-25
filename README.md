@@ -18,14 +18,14 @@
 
 ---
 
-Alchemist Template is a SaaS starter built on Deno 2, Hono 4, Svelte 5, and PostgreSQL. It ships with auth, billing, RBAC, structured logging, and an idiomatic Kysely + services layout, plus a `CLAUDE.md` authored so AI agents (Claude Code, Cursor, or the [Alchemist AI](https://adaas.dev) platform itself) can navigate and extend it without fighting the conventions. Fork it as the starting point for any new product.
+Alchemist Template (MCP-server edition) is a headless Deno 2 + Hono 4 starter whose primary surface is a **Model Context Protocol server at `/api/mcp`**. It ships with a tool registry, an example `echo` tool, auth, billing, RBAC, structured logging, and an idiomatic Kysely + services layout, plus a `CLAUDE.md` authored so AI agents (Claude Code, Cursor, or the [Alchemist AI](https://adaas.dev) platform itself) can navigate and extend it without fighting the conventions. Fork it as the starting point for any MCP-native product.
 
 It is also the seed repo every customer project on the [Alchemist AI](https://adaas.dev) platform is cloned from. The conventions here are the ones autonomous agents are trained against -- using this template means agents work with you, not around you.
 
 ## What's in the box
 
-- **API** -- Deno 2 + Hono 4 with Zod request validation and typed error handling.
-- **SPA** -- Svelte 5 (runes) + Vite, hash-based router, typed fetch wrapper.
+- **MCP server** -- Model Context Protocol endpoint at `/api/mcp`. Streamable HTTP transport, stateless per-request mode, a tool-registry abstraction, and an `echo` example tool. Add tools in `src/mcp/tools/`. See [`docs/mcp-server.md`](docs/mcp-server.md).
+- **API** -- Deno 2 + Hono 4 with Zod request validation and typed error handling. No frontend is served — the MCP endpoint and the `/api/*` REST routes are the entire surface.
 - **Database** -- PostgreSQL via Kysely with `CamelCasePlugin` (camelCase in TS, snake_case in SQL). Migrations are plain SQL files in `db/migrations/`, auto-applied on startup.
 - **Cache + sessions** -- Redis, with helpers for rate limits and key-scoped invalidation.
 - **Auth** -- Email OTP login, session cookies, JWT for API tokens, OAuth providers via Arctic 2. Includes a documented dev-login escape hatch so local + agent testing works without an SMTP inbox.
@@ -40,14 +40,14 @@ It is also the seed repo every customer project on the [Alchemist AI](https://ad
 ## Architecture
 
 ```
-Browser
+MCP Client (Claude Desktop, CLI plugin, IDE, Inspector)
    |
+   v  POST /api/mcp  (Streamable HTTP, SSE response)
+Hono 4 API                (src/api/routes/mcp/  +  src/api/routes/*)
+   |   Origin guard, MCP JSON-RPC dispatch, Zod-validated REST
    v
-Svelte 5 SPA              (web/)
-   |   hash-based routing, runes stores, typed fetch
-   v
-Hono 4 API                (src/api/routes/  ->  src/services/)
-   |   Zod-validated, session + JWT auth, structured errors
+src/mcp/                  (tool registry + server factory + tool modules)
+   |
    v
 PostgreSQL                (Kysely, NNN_*.sql migrations auto-applied)
    +
@@ -56,7 +56,7 @@ Redis                     (sessions, cache, rate limits)
 Stripe                    (subscriptions, credits, customer portal)
 ```
 
-**Stack:** Deno 2, Hono 4, Svelte 5 (runes), Vite, Kysely 0.27, PostgreSQL, Redis, Arctic 2, Stripe 17, Zod 3, nodemailer 6.
+**Stack:** Deno 2, Hono 4, @modelcontextprotocol/sdk, Kysely 0.27, PostgreSQL, Redis, Arctic 2, Stripe 17, Zod 3, nodemailer 6.
 
 ## Quick start
 
@@ -76,32 +76,49 @@ cd my-app
 ./scripts/dev.sh --api-port 8000 --port 5173
 ```
 
-This runs the Hono API on `:8000` and the Vite SPA on `:5173` in one terminal. Open `http://localhost:5173`.
+This starts the Hono API on `:8000`. There is no Vite SPA in this template — the
+MCP endpoint and `/api/*` routes are the entire surface.
 
-> **Always use the Vite URL (`:5173`) in your browser**, not the API URL. Vite serves the SPA shell and proxies `/api/*` to the API. Hitting `:8000` directly will 404 everything that isn't an API route.
+### 3. Smoke-test the MCP server
 
-### 3. Log in (no SMTP needed)
+```bash
+# Initialize handshake
+curl -s -X POST http://localhost:8000/api/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.0.1"}}}'
 
-There's no SMTP harness in dev, so OTP codes never reach an inbox. Use the dev-login escape hatch instead:
+# Or connect via the MCP Inspector
+npx @modelcontextprotocol/inspector http://localhost:8000/api/mcp
+```
 
-- **In the browser:** the Login page renders a "Dev login as ..." button below the OTP form (only visible when `import.meta.env.DEV`). It POSTs to `/api/dev/login` and sets a real session.
-- **From an agent or terminal:**
-  ```bash
-  curl -X POST -H 'Content-Type: application/json' \
-       -d '{"email":"agent@dev.local"}' \
-       http://localhost:8000/api/dev/login \
-       -c /tmp/jar.txt
-  ```
-  Re-use the cookie jar with `-b /tmp/jar.txt` on subsequent requests.
+### 4. Dev login (for auth-gated REST routes)
 
-The `/api/dev/*` routes 404 when `NODE_ENV=production`, and the dev-login button is stripped from production SPA builds -- both surfaces are local-only by construction.
+There's no SMTP harness in dev, so OTP codes never reach an inbox. The MCP
+endpoint is public — no login needed. For testing auth-gated REST routes:
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"email":"agent@dev.local"}' \
+     http://localhost:8000/api/dev/login \
+     -c /tmp/jar.txt
+# Re-use the cookie jar with -b /tmp/jar.txt on subsequent requests.
+```
+
+The `/api/dev/*` routes 404 when `NODE_ENV=production` -- local-only by construction.
 
 ## Project structure
 
 ```
 src/
+  mcp/
+    registry.ts    MCP tool registry (registerMcpTool / listMcpTools / getMcpTool)
+    server.ts      McpServer factory (createMcpServer)
+    tools/
+      echo.ts      Example tool — add new tools here
   api/
-    routes/        Hono handlers (thin orchestration)
+    routes/
+      mcp/         Hono sub-router that serves /api/mcp
+      ...          Other REST route handlers
     middleware/    auth, validation, error handling
   services/        business logic (one file per domain)
   db/
@@ -109,20 +126,17 @@ src/
     schema.ts      table type definitions
   lib/logger.ts    structured logger (NDJSON in prod)
   __tests__/
-    routes/        route integration tests
+    routes/        route integration tests (including mcp_route_test.ts)
     services/      service unit tests
     helpers.ts     test utilities (createIsolatedUser, ...)
-web/
-  src/
-    routes/        Svelte 5 pages (hash router)
-    stores/        runes-based state
-    lib/api.ts     typed fetch wrapper with 401 handling
 db/
   migrations/      NNN_*.sql files, auto-applied on startup
   migrate.ts       migration runner
+docs/
+  mcp-server.md    MCP server design record (transport, tool registry, security)
 scripts/
   setup.sh         one-shot dev bootstrap
-  dev.sh           run API + Vite together
+  dev.sh           run API server
 CLAUDE.md          project context for AI agents
 ```
 
@@ -131,11 +145,10 @@ CLAUDE.md          project context for AI agents
 This template is intentionally generic. The path from clone to "your product" is:
 
 1. **Rewrite `CLAUDE.md`.** Replace the `[Project Name]` header and `[Brief description...]` paragraph with what you're actually building. This is the file every AI agent reads first -- get it right and agents need almost no orientation. See [working with AI agents](#working-with-ai-agents) below.
-2. **Update `web/index.html`.** Change the `<title>` and any meta tags.
-3. **Centralize brand in `src/config/brand.ts`.** App name, logo, colors, marketing copy -- the template reads from one place so there are no string-literal leaks of "Alchemist" anywhere in your fork.
-4. **Add your schema.** Create migration files in `db/migrations/` following the `NNN_description.sql` convention. The runner applies them in order on startup. Update `src/db/schema.ts` with matching TypeScript types -- the `CamelCasePlugin` handles the case conversion at the DB boundary.
-5. **Add routes + services.** Drop new files into `src/api/routes/` and mount them in `src/api/index.ts`. Put the logic in `src/services/`. Keep routes thin.
-6. **Add pages.** Create components in `web/src/routes/` and register them with the hash router.
+2. **Centralize brand in `src/config/brand.ts`.** App name and transactional email address -- the template reads from one place so there are no string-literal leaks of "Alchemist" anywhere in your fork.
+3. **Add your schema.** Create migration files in `db/migrations/` following the `NNN_description.sql` convention. The runner applies them in order on startup. Update `src/db/schema.ts` with matching TypeScript types -- the `CamelCasePlugin` handles the case conversion at the DB boundary.
+4. **Add MCP tools.** Create a file in `src/mcp/tools/` that calls `registerMcpTool(...)` at module top-level, then add an `import "@/mcp/tools/my_tool.ts"` side-effect import in `src/mcp/server.ts`. See [`docs/mcp-server.md`](docs/mcp-server.md) for the full pattern and security notes.
+5. **Add REST routes + services.** Drop new files into `src/api/routes/` and mount them in `app.ts`. Put the logic in `src/services/`. Keep routes thin.
 
 The template ships with the foundation you'd otherwise build yourself: organizations, users, sessions, OAuth, OTP, Stripe customers + subscriptions, credit grants, user preferences, team invites. You shouldn't have to touch most of it -- just build your domain on top.
 
