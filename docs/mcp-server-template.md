@@ -32,12 +32,10 @@ be a plain object of field → Zod validators (`ZodRawShape`):
 
 ```ts
 // Correct — raw shape
-inputSchema: {
-  name: z.string().min(1);
-}
+inputSchema: { name: z.string().min(1) }
 
 // Wrong — wrapped form (V2 split-package idiom; type-errors under strict)
-inputSchema: z.object({ name: z.string().min(1) });
+inputSchema: z.object({ name: z.string().min(1) })
 ```
 
 Most LLM training data and the v2 docs show the wrapped form. This
