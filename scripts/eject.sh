@@ -13,7 +13,7 @@ set -euo pipefail
 #   5. Writes a self-hosting guide into the output directory
 #
 # What the customer gets:
-#   - Their full codebase (standard Deno + Hono + Svelte 5 template)
+#   - Their full codebase (standard headless Deno + Hono MCP-server template)
 #   - A portable SQL dump importable into any PostgreSQL instance
 #   - A SELF_HOSTING.md guide for running the app themselves
 #   - A clean CLAUDE.md they can customize via Claude Code
@@ -448,7 +448,7 @@ else
 # Self-Hosting Guide
 
 This project was ejected from Alchemist AI on ${EJECTED_AT}.
-It is a standard Deno + Hono + Svelte 5 SPA that runs anywhere.
+It is a standard headless Deno + Hono backend (MCP server at \`/api/mcp\`) that runs anywhere.
 
 ## What Changed During Eject
 
@@ -462,7 +462,6 @@ It is a standard Deno + Hono + Svelte 5 SPA that runs anywhere.
 
 - [Deno](https://deno.land/) >= 1.40
 - [Docker](https://docs.docker.com/get-docker/) (for local Postgres + Redis)
-- [Node.js](https://nodejs.org/) >= 18 (for Vite frontend build)
 
 ## Database Import
 
@@ -491,10 +490,10 @@ DATABASE_URL=postgres://... deno task db:migrate
 cp .env.example .env
 # Edit .env with your DATABASE_URL, Redis URL, session secrets, etc.
 
-# 2. Start the dev stack (Postgres + Redis via Docker, then Deno API + Vite)
-./scripts/dev.sh --api-port 8000 --port 5173
+# 2. Start the dev stack (Postgres + Redis via Docker, then the Deno API)
+./scripts/dev.sh --api-port 8000
 
-# 3. Open http://localhost:5173
+# 3. Hit the MCP server at http://localhost:8000/api/mcp
 \`\`\`
 
 ## Environment Variables
@@ -592,7 +591,7 @@ Remove Alchemist platform dependencies:
 - 'Powered by Alchemist AI' branding removed from CLAUDE.md
 - SELF_HOSTING.md added with self-hosting instructions
 
-The app is now a standalone Deno + Hono + Svelte 5 project.
+The app is now a standalone headless Deno + Hono project (MCP server at /api/mcp).
 See SELF_HOSTING.md to run it independently."
       log_ok "  Cleanup committed to git"
     }
@@ -742,7 +741,7 @@ createdb ${APP_SLUG}
 psql ${APP_SLUG} < ${DUMP_FILENAME}
 
 # 4. Start the dev stack
-./scripts/dev.sh --api-port 8000 --port 5173
+./scripts/dev.sh --api-port 8000
 \`\`\`
 
 ## Environment Variables to Configure

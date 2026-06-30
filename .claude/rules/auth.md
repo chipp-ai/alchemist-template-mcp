@@ -5,7 +5,6 @@ paths:
   - "src/auth/**"
   - "src/api/middleware/**"
   - "src/lib/roles.ts"
-  - "web/src/lib/permissions.ts"
   - "src/api/routes/org/**"
   - "src/api/routes/invite/**"
 ---
@@ -34,9 +33,11 @@ orgRoutes.post(
 ## Roles
 
 A 4-role hierarchy lives in **one** file — `src/lib/roles.ts` on the
-server, mirrored EXACTLY in `web/src/lib/permissions.ts` on the client.
-A regression test (`src/__tests__/team.test.ts → "client mirror"`) lints
-the two files for the same capability list and roles.
+server. (In the web-app template this is mirrored exactly in
+`web/src/lib/permissions.ts` on the client; the MCP-server template is
+headless and has no such mirror file. The regression test
+`src/__tests__/team.test.ts → "client mirror"` is guarded with
+`hasWebDir()` and no-ops when `web/` is absent.)
 
 | Role | Count | Powers |
 |---|---|---|
@@ -71,8 +72,8 @@ schema drift.
 - Admins cannot manage other admins — only the owner can. Prevents lateral demotion wars.
 - Viewers and editors can never manage anyone.
 
-The Settings → Team UI uses `canManage` to gate role-edit dropdowns and
-remove buttons per-row.
+In a web frontend (not present in the headless MCP-server template),
+`canManage` gates role-edit dropdowns and remove buttons per-row.
 
 ## Invite flow
 
@@ -88,7 +89,9 @@ POST   /api/invite/:token/accept     → consume token (auth required;
                                        authenticated email must match invite email)
 ```
 
-Frontend route: `/#/invite/:token` → `web/src/routes/InviteAccept.svelte`.
+Frontend route (web-app template only): `/#/invite/:token` →
+`web/src/routes/InviteAccept.svelte`. The MCP-server template is headless
+and ships no frontend routes or Svelte components.
 
 **CRITICAL: removing a member is SOFT-DISCONNECT, not hard-delete.** The
 `DELETE /members/:userId` route sets `users.organization_id = NULL` and

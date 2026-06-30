@@ -91,7 +91,7 @@ Origin get a sensible error.
 client to reach your server (e.g. a web-hosted inspector or custom web UI):
 
 ```
-MCP_ALLOWED_ORIGINS=https://inspector.example.com,http://localhost:5173
+MCP_ALLOWED_ORIGINS=https://inspector.example.com,http://localhost:6274
 ```
 
 ### Dual mount (trailing-slash 404 fix)

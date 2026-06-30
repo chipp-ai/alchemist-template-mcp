@@ -33,7 +33,6 @@ check_tool() {
 check_tool "deno"
 check_tool "docker"
 check_tool "git"
-check_tool "node"
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
   echo "Error: Missing required tools: ${MISSING[*]}"
@@ -44,7 +43,6 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
       deno)   echo "  deno:   curl -fsSL https://deno.land/install.sh | sh" ;;
       docker) echo "  docker: https://docs.docker.com/get-docker/" ;;
       git)    echo "  git:    https://git-scm.com/downloads" ;;
-      node)   echo "  node:   https://nodejs.org/ (needed for web/ dependencies)" ;;
     esac
   done
   exit 1
@@ -54,7 +52,6 @@ echo "All required tools found:"
 echo "  deno:   $(deno --version | head -1)"
 echo "  docker: $(docker --version)"
 echo "  git:    $(git --version)"
-echo "  node:   $(node --version)"
 echo ""
 
 # ── Copy .env.example to .env if needed ──
@@ -71,14 +68,6 @@ echo ""
 # ── Create scratch directories ──
 
 mkdir -p "$PROJECT_ROOT/.scratch/logs"
-
-# ── Install web dependencies ──
-
-echo "Installing web dependencies..."
-cd "$PROJECT_ROOT/web"
-npm install
-cd "$PROJECT_ROOT"
-echo ""
 
 # ── Start Docker services ──
 
@@ -133,7 +122,7 @@ echo "  Next steps:"
 echo ""
 echo "  1. Review and customize .env"
 echo "  2. Start the dev stack:"
-echo "     ./scripts/dev.sh --api-port 8000 --port 5173"
+echo "     ./scripts/dev.sh --api-port 8000"
 echo ""
-echo "  3. Open http://localhost:5173 in your browser"
+echo "  3. Open http://localhost:8000/api/mcp"
 echo ""
