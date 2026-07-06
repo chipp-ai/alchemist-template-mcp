@@ -28,6 +28,9 @@ import { observabilityRoutes } from "@/api/routes/observability/index.ts";
 import { docsRoutes } from "@/api/routes/docs/index.ts";
 import { devRoutesEnabled } from "@/lib/dev-mode.ts";
 import { mcpRoutes } from "@/api/routes/mcp/index.ts";
+import { mcpOauthRoutes } from "@/api/routes/mcp/oauth.ts";
+import { wellKnownRoutes } from "@/api/routes/well-known.ts";
+import { apiKeyRoutes } from "@/api/routes/api-keys/index.ts";
 
 // ── App types ──
 
@@ -145,6 +148,16 @@ app.route("/api/_observability", observabilityRoutes);
 // (/api/mcp/foo) still 404. See src/api/routes/mcp/index.ts and src/mcp/.
 app.route("/api/mcp", mcpRoutes);
 app.route("/api/mcp/", mcpRoutes);
+
+// MCP OAuth 2.1 authorization server (authorize/token/register/revoke) +
+// the RFC 8414 / RFC 9728 discovery documents at the domain root. This is
+// how remote MCP hosts (claude.ai connectors, ChatGPT, Claude Code)
+// authenticate to /api/mcp -- see docs/mcp-server.md § Authentication.
+app.route("/api/mcp/oauth", mcpOauthRoutes);
+app.route("/.well-known", wellKnownRoutes);
+
+// API keys (secondary MCP/REST auth for headless callers). Session-authed.
+app.route("/api/api-keys", apiKeyRoutes);
 
 // ── MCP-server template (headless) ──
 // This template serves NO frontend. There is no web/ SPA and no static

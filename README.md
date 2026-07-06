@@ -27,12 +27,12 @@ It is also the seed repo every customer project on the [Alchemist AI](https://ad
 
 ## What's in the box
 
-- **MCP server** -- Model Context Protocol endpoint at `/api/mcp`, built on `@modelcontextprotocol/sdk` (bare specifier). Streamable HTTP transport, stateless per-request mode, a tool-registry abstraction, and an `echo` example tool. Add tools in `src/mcp/tools/`. See [`docs/mcp-server.md`](docs/mcp-server.md).
+- **MCP server** -- Model Context Protocol endpoint at `/api/mcp`, built on `@modelcontextprotocol/sdk` (bare specifier). Streamable HTTP transport, stateless per-request mode, a tool-registry abstraction, and an `echo` example tool. Ships a full **OAuth 2.1 authorization server** (RFC 8414/9728 discovery, dynamic client registration, PKCE, server-rendered login/consent) so claude.ai connectors, ChatGPT, and Claude Code can connect natively (`MCP_AUTH_MODE=oauth`), plus `mcp_sk_` API keys for headless callers. Add tools in `src/mcp/tools/`. See [`docs/mcp-server.md`](docs/mcp-server.md).
 - **API** -- Deno 2 + Hono 4 with Zod request validation and typed error handling. No frontend is served — the MCP endpoint and the `/api/*` REST routes (auth, billing, files, etc.) are the entire surface.
 - **Database** -- PostgreSQL via Kysely with `CamelCasePlugin` (camelCase in TS, snake_case in SQL). Migrations are plain SQL files in `db/migrations/`, auto-applied on startup.
 - **Cache + sessions** -- Redis, with helpers for rate limits and key-scoped invalidation.
 - **Auth** -- Email OTP login, session cookies, JWT for API tokens, OAuth providers via Arctic 2. Includes a documented dev-login escape hatch so local + agent testing works without an SMTP inbox.
-- **Billing** -- Stripe 17. Subscriptions, credit grants, metered usage, customer portal.
+- **Billing** -- Stripe 17. Plan-tier subscriptions + customer portal, AND per-call PAID MCP TOOLS via MPP (Stripe machine payments): price a tool in fiat (Shared Payment Tokens) or USDC and agents pay per invocation. See docs/mcp-server.md.
 - **Email** -- SMTP via nodemailer with environment-driven configuration.
 - **RBAC + teams** -- Organizations, members, roles, invites. Wired through the auth middleware and routes.
 - **Logging** -- Structured logger (pretty in dev, NDJSON in production), ready for Loki / Datadog / any aggregator.

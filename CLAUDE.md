@@ -149,6 +149,78 @@ The result `content[0].text` is your tool's output (`Hello, world!`).
 
 **`create_project(template_key='mcp-server')`:** Alchemist Cloud's project-creation API selects this repo when that key is provided. The generated project starts from a functioning, extensible MCP server at `/api/mcp` with at least one example tool.
 
+### Authentication -- OAuth 2.1 primary, API keys secondary (do NOT rebuild)
+
+The template ships a complete OAuth 2.1 authorization server for `/api/mcp`
+-- it is what remote MCP hosts (claude.ai custom connectors, ChatGPT, Claude
+Code, IDE clients) speak natively. **When a ticket says "add auth to the MCP
+server" or "users must log in to use the tools", flip `MCP_AUTH_MODE=oauth`
+and use the resolved identity -- never hand-roll a new token system.**
+
+| Piece | Where |
+|---|---|
+| AS endpoints (authorize/token/register/revoke) + server-rendered OTP login/consent | `src/api/routes/mcp/oauth.ts` |
+| RFC 8414 + RFC 9728 discovery (request-derived issuer) | `src/api/routes/well-known.ts` |
+| Bearer middleware (`MCP_AUTH_MODE=public\|oauth`) | `src/api/middleware/mcp-auth.ts` |
+| Token/code/client services (hashed at rest, PKCE S256, refresh rotation) | `src/services/mcp-oauth/` |
+| API keys (`mcp_sk_`, secondary; mint via `POST /api/api-keys`) | `src/services/api-key.service.ts` |
+| Tables | `mcp_oauth_clients` / `mcp_oauth_auth_codes` / `mcp_oauth_tokens` + existing `api_credentials` |
+
+Today's tools are identity-free by design (the registry handler receives only
+validated args). When a ticket needs per-user tool behavior, run under
+`MCP_AUTH_MODE=oauth` and thread the middleware's resolved `McpAuthContext`
+(`getMcpAuth(c)` in the route) into `createMcpServer()`/the handlers as part
+of that ticket -- extend the seam, don't invent a parallel auth path.
+
+Invariants: tokens/codes are stored as SHA-256 hashes only; auth codes are
+single-use + PKCE-bound; refresh rotation is strict; the discovery `issuer`
+derives from the request host (RFC 8414) -- never hardcode it; the 401
+challenge's `resource_metadata` points at the RFC 9728 PRM URL, never the
+AS metadata URL.
+
+### Paid tools -- MPP machine payments via Stripe (do NOT rebuild)
+
+Any tool can charge per call. Add a `price` to `registerMcpTool` and the
+payment gate in `src/mcp/server.ts` handles challenge, verification,
+charging, and receipts (MPP -- Stripe's Machine Payments Protocol,
+https://docs.stripe.com/payments/machine/mpp, npm package `mppx`):
+
+```ts
+registerMcpTool({
+  name: "analyze_document",
+  description: "Deep analysis of a document.",
+  inputSchema: { url: z.string().url() },
+  price: { fiatUsd: "0.50", cryptoUsd: "0.05" }, // either lane optional
+  handler: async (args) => { /* runs ONLY after verified payment */ },
+});
+```
+
+Wire shape (paymentauth spec, all handled by `src/services/mpp.service.ts`):
+an unpaid call returns an `isError` tool result carrying signed challenges in
+`_meta["org.paymentauth/payment-required"]`; MPP-capable agents (mppx client,
+`@stripe/link-cli`) pay and retry the SAME call with the credential in
+`_meta["org.paymentauth/credential"]`; the verified result carries a receipt
+in `_meta["org.paymentauth/receipt"]`. Non-paying clients see honest text and
+are told not to retry.
+
+Rules:
+
+- **Never `throw` the challenge McpError from a tool handler** -- the SDK's
+  `registerTool` flattens thrown errors to text and strips the challenges.
+  Return `paymentRequiredToolResult(...)` (the gate already does).
+- Env: `MPP_SECRET_KEY` (challenge signing; STABLE across replicas) +
+  `STRIPE_SECRET_KEY`/`STRIPE_PROFILE_ID` (fiat SPT lane, min $0.50) and/or
+  `MPP_CRYPTO_ENABLED=1` (USDC on Tempo, min $0.01; needs the Stripe
+  "Stablecoins and Crypto" payment method approved).
+- Priced tools FAIL CLOSED with honest anti-confabulation wording when no
+  payment lane is configured -- keep that behavior when editing.
+- Payments land in the Stripe account of `STRIPE_SECRET_KEY` (the project
+  owner's connected account). Fiat charge minimum is 0.50 USD -- price
+  cheaper calls in USDC or aggregate.
+- MPP is for PER-CALL pricing to possibly-anonymous agents. Subscriptions /
+  entitlements for known users are a different layer (plan-tier billing in
+  `src/api/routes/billing/`); don't conflate them.
+
 ## Engineering Preferences
 
 These guide all code review and implementation decisions:

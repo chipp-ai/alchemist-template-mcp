@@ -114,21 +114,65 @@ returns the raw `Response` object from the SDK transport — bypassing the norma
 `c.json({ data: ... })` envelope. This is a sanctioned exception (see the
 api-layer rule).
 
-### No authentication by default
+### Authentication -- OAuth 2.1 primary, API keys secondary
 
-`/api/mcp` is intentionally public for the starter. The example `echo` tool has
-nothing sensitive; the origin guard is the appropriate hardening for a headless
-server. When adding tools that access tenant data, add `requireAuth` middleware
-**before** the transport handler and scope queries to the authenticated user's
-organization.
+`MCP_AUTH_MODE` controls the posture:
+
+- `public` (default) -- no auth required. Correct for the bare starter (the
+  `echo` tool has nothing sensitive). A presented Bearer token is STILL
+  resolved (tools can personalize), it's just not required.
+- `oauth` -- Bearer token REQUIRED. Flip this the moment the server exposes
+  anything non-public.
+
+Two token types are accepted, routed by prefix (`src/api/middleware/mcp-auth.ts`):
+
+| Token | Who uses it | How they get it |
+|---|---|---|
+| `mcp_at_...` OAuth 2.1 access token (PRIMARY) | claude.ai custom connectors, ChatGPT, Claude Code, IDE clients | The built-in authorization server: RFC 9728 discovery -> RFC 7591 dynamic registration -> browser consent (server-rendered email-OTP login + consent pages) -> PKCE code -> token. Fully automatic in every mainstream remote-MCP client: the user pastes the server URL and clicks through. |
+| `mcp_sk_...` API key (SECONDARY) | Headless/server-to-server callers, CI | Minted via `POST /api/api-keys` (session auth); plaintext shown once. |
+
+The AS lives at `/api/mcp/oauth/*` (authorize / token / register / revoke),
+discovery at `/.well-known/oauth-authorization-server` and
+`/.well-known/oauth-protected-resource` (RFC 8414 / RFC 9728, bare + `/api/mcp`
+suffixed variants). In `oauth` mode a 401 carries
+`WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource"`
+-- that header is step 1 of every modern MCP client's OAuth discovery, and it
+MUST point at the PRM document, not the AS metadata.
+
+Invariants (each backed by a test in `mcp_oauth_service_test.ts` /
+`mcp_oauth_flow_test.ts`):
+
+- Tokens/codes stored as SHA-256 hashes only; plaintext returned once.
+- Auth codes: 5 min TTL, single-use (atomic FOR UPDATE consume), PKCE S256.
+- Refresh rotation is strict -- replaying an old refresh token fails.
+- Redirect URIs: exact match + `:*` localhost wildcard port only.
+- The metadata `issuer` derives from the REQUEST host (RFC 8414 requires the
+  issuer to match the fetched URL) -- never hardcode it.
+- Tokens are user-scoped; the org is resolved live from `users` at lookup.
+
+### Paid tools -- MPP (Stripe machine payments)
+
+Any registered tool can charge per call: add a `price` to `registerMcpTool`
+and the payment gate in `src/mcp/server.ts` does the rest. See
+`src/mcp/tools/premium_echo.ts` for the pattern and the "Paid tools" section
+of CLAUDE.md for the full contract (env vars, wire shape, receipts).
 
 ## Public contract
 
 ```
 POST /api/mcp        MCP Streamable HTTP — initialize, tools/list, tools/call
                      Content-Type: application/json  →  text/event-stream SSE
+                     Authorization: Bearer mcp_at_... | mcp_sk_...  (required in oauth mode)
+
+GET  /.well-known/oauth-authorization-server   RFC 8414 AS metadata
+GET  /.well-known/oauth-protected-resource     RFC 9728 PRM (advertised on 401)
+POST /api/mcp/oauth/{authorize,token,register,revoke}   OAuth 2.1 AS
+GET  /api/mcp/oauth/authorize                  server-rendered login/consent
+POST /api/api-keys                             mint an API key (session auth)
 
 Env: MCP_ALLOWED_ORIGINS  comma-separated browser origins to allowlist (default: none)
+     MCP_AUTH_MODE        public (default) | oauth
+     MPP_SECRET_KEY, STRIPE_PROFILE_ID, MPP_CRYPTO_ENABLED  paid tools (see CLAUDE.md)
 ```
 
 ## Connecting a client

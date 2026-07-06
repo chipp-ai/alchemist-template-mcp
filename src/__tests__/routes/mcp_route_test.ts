@@ -237,3 +237,229 @@ deno("mcp: no Origin header (real MCP client) is allowed through", async () => {
   const serverInfo = (json.result as Record<string, unknown>).serverInfo as Record<string, unknown>;
   assertEquals(serverInfo.name, "alchemist-mcp-server");
 });
+
+// ── Auth modes (MCP_AUTH_MODE) ──────────────────────────────────────────────
+//
+// These tests MUTATE process env, and env is shared across parallel test
+// workers -- every test here restores the previous value in `finally`, and
+// every test that touches /api/mcp auth/payment env lives in THIS file so
+// they serialize (tests within one file run sequentially).
+
+import { createIsolatedUser } from "../helpers.ts";
+import { apiKeyService } from "@/services/api-key.service.ts";
+
+function withEnv(vars: Record<string, string>, fn: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    const previous = new Map<string, string | undefined>();
+    for (const [k, v] of Object.entries(vars)) {
+      previous.set(k, Deno.env.get(k));
+      Deno.env.set(k, v);
+    }
+    try {
+      await fn();
+    } finally {
+      for (const [k, old] of previous) {
+        if (old === undefined) Deno.env.delete(k);
+        else Deno.env.set(k, old);
+      }
+    }
+  };
+}
+
+deno(
+  "mcp auth: oauth mode without a token returns 401 with the RFC 9728 challenge",
+  withEnv({ MCP_AUTH_MODE: "oauth" }, async () => {
+    const res = await app.request("/api/mcp", {
+      method: "POST",
+      headers: {
+        host: "myapp.example.com",
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    await res.text();
+    assertEquals(res.status, 401);
+    const challenge = res.headers.get("www-authenticate") ?? "";
+    // The challenge MUST point at the RFC 9728 PRM URL (NOT the RFC 8414 AS
+    // URL) -- clients probe it as step 1 of MCP OAuth discovery.
+    assertEquals(
+      challenge.includes("resource_metadata="),
+      true,
+      `expected resource_metadata in WWW-Authenticate, got: ${challenge}`,
+    );
+    assertEquals(challenge.includes("/.well-known/oauth-protected-resource"), true);
+  }),
+);
+
+deno(
+  "mcp auth: oauth mode rejects a garbage bearer token",
+  withEnv({ MCP_AUTH_MODE: "oauth" }, async () => {
+    const res = await app.request("/api/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        authorization: "Bearer mcp_at_definitely-not-real",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    await res.text();
+    assertEquals(res.status, 401);
+  }),
+);
+
+deno(
+  "mcp auth: oauth mode accepts an API key (secondary method)",
+  withEnv({ MCP_AUTH_MODE: "oauth" }, async () => {
+    const { user, cleanup } = await createIsolatedUser("owner");
+    try {
+      const minted = await apiKeyService.mint({ userId: user.id, name: "test key" });
+      const res = await app.request("/api/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${minted.key}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "echo", arguments: { message: "key hello" } },
+        }),
+      });
+      const text = await res.text();
+      assertEquals(res.status, 200);
+      assertEquals(text.includes("key hello"), true);
+    } finally {
+      await cleanup();
+    }
+  }),
+);
+
+deno("mcp auth: public mode (default) still serves unauthenticated requests", async () => {
+  // No env mutation -- asserts the default posture stays back-compatible.
+  const res = await app.request("/api/mcp", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+  });
+  const text = await res.text();
+  assertEquals(res.status, 200);
+  assertEquals(text.includes("echo"), true);
+});
+
+// ── Paid tools (MPP / Stripe machine payments) ──────────────────────────────
+
+const MPP_TEST_ENV = {
+  MPP_SECRET_KEY: "dGVzdC1zZWNyZXQta2V5LXRlc3Qtc2VjcmV0LWtleS0xMg==",
+  STRIPE_SECRET_KEY: "sk_test_dummy_for_challenge_generation",
+  STRIPE_PROFILE_ID: "profile_test_dummy",
+};
+
+deno(
+  "mcp paid tools: unpaid call returns challenges in _meta (payment-required), tool does NOT run",
+  withEnv(MPP_TEST_ENV, async () => {
+    // Challenge generation is fully offline -- no Stripe network call happens
+    // until a client actually presents a payment credential.
+    const { res, json } = await postJsonRpc(
+      withTestServer((a) => {
+        a.route("/api/mcp", mcpRoutes);
+      }),
+      "tools/call",
+      { name: "premium_echo", arguments: { message: "pay me" } },
+    );
+    assertEquals(res.status, 200);
+    assertExists(json);
+    const result = (json as Record<string, unknown>).result as Record<string, unknown>;
+    assertExists(result, "expected a tool RESULT (not a protocol error)");
+    assertEquals(result.isError, true);
+
+    // The paymentauth payment-required metadata carries signed challenges.
+    const meta = result._meta as Record<string, unknown> | undefined;
+    assertExists(meta, "expected _meta on the payment-required result");
+    const paymentRequired = meta!["org.paymentauth/payment-required"] as
+      | { challenges?: Array<Record<string, unknown>> }
+      | undefined;
+    assertExists(paymentRequired, "expected org.paymentauth/payment-required in _meta");
+    const challenges = paymentRequired!.challenges ?? [];
+    assertEquals(challenges.length > 0, true, "expected at least one payment challenge");
+    assertEquals(challenges[0].method, "stripe");
+    assertEquals(challenges[0].intent, "charge");
+
+    // The tool body must NOT have run.
+    const content = (result.content as Array<Record<string, unknown>>) ?? [];
+    const text = String(content[0]?.text ?? "");
+    assertEquals(text.includes("[paid] pay me"), false, "tool must not execute unpaid");
+    assertEquals(text.includes("Payment required"), true);
+  }),
+);
+
+deno(
+  "mcp paid tools: description advertises the price",
+  withEnv(MPP_TEST_ENV, async () => {
+    const { json } = await postJsonRpc(
+      withTestServer((a) => {
+        a.route("/api/mcp", mcpRoutes);
+      }),
+      "tools/list",
+    );
+    const result = (json as Record<string, unknown>).result as Record<string, unknown>;
+    const tools = (result.tools as Array<Record<string, unknown>>) ?? [];
+    const premium = tools.find((t) => t.name === "premium_echo");
+    assertExists(premium, "premium_echo must be listed");
+    const description = String(premium!.description ?? "");
+    assertEquals(description.includes("PAID TOOL"), true);
+    assertEquals(description.includes("$0.50"), true);
+  }),
+);
+
+deno("mcp paid tools: fail closed with honest wording when payments unconfigured", async () => {
+  // Explicitly clear the MPP env for this test (restore after).
+  const restore = new Map<string, string | undefined>();
+  for (const k of Object.keys(MPP_TEST_ENV)) {
+    restore.set(k, Deno.env.get(k));
+    Deno.env.delete(k);
+  }
+  try {
+    const { json } = await postJsonRpc(
+      withTestServer((a) => {
+        a.route("/api/mcp", mcpRoutes);
+      }),
+      "tools/call",
+      { name: "premium_echo", arguments: { message: "pay me" } },
+    );
+    const result = (json as Record<string, unknown>).result as Record<string, unknown>;
+    assertEquals(result.isError, true);
+    const content = (result.content as Array<Record<string, unknown>>) ?? [];
+    const text = String(content[0]?.text ?? "");
+    assertEquals(text.includes("no payment method configured"), true);
+    assertEquals(text.includes("Do NOT retry"), true);
+  } finally {
+    for (const [k, v] of restore) {
+      if (v === undefined) Deno.env.delete(k);
+      else Deno.env.set(k, v);
+    }
+  }
+});
+
+deno(
+  "mcp paid tools: free tools stay free when MPP is configured",
+  withEnv(MPP_TEST_ENV, async () => {
+    const { res, json } = await postJsonRpc(
+      withTestServer((a) => {
+        a.route("/api/mcp", mcpRoutes);
+      }),
+      "tools/call",
+      { name: "echo", arguments: { message: "still free" } },
+    );
+    assertEquals(res.status, 200);
+    const result = (json as Record<string, unknown>).result as Record<string, unknown>;
+    const content = (result.content as Array<Record<string, unknown>>) ?? [];
+    assertEquals(content[0].text, "still free");
+  }),
+);

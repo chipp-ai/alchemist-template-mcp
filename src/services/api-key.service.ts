@@ -1,0 +1,162 @@
+/**
+ * API keys for the MCP endpoint + REST API -- the SECONDARY auth method.
+ *
+ * OAuth (src/services/mcp-oauth/) is the primary path: it's what remote MCP
+ * hosts (claude.ai connectors, ChatGPT, Claude Code) speak natively. API keys
+ * exist for headless/server-to-server callers and CI, where a browser consent
+ * flow is impossible.
+ *
+ * Backed by the api_credentials table that ships in 001_initial_schema.sql.
+ * Keys look like `mcp_sk_<43 base64url chars>`; the plaintext is shown ONCE
+ * at mint. Storage is SHA-256 hex (keyHash) plus a short keyPrefix for an
+ * indexed lookup before the constant-time hash compare.
+ */
+
+import { timingSafeEqual } from "node:crypto";
+import { Buffer } from "node:buffer";
+import { db } from "@/db/client.ts";
+import { log } from "@/lib/logger.ts";
+import { generateMcpToken, hashMcpToken } from "@/services/mcp-oauth/pkce.ts";
+import { normalizeMcpScopes } from "@/services/mcp-oauth/permissions.ts";
+
+/** Indexed-lookup prefix length ("mcp_sk_" + 8 chars; column is varchar(20)). */
+const KEY_PREFIX_LENGTH = 15;
+
+export interface MintedApiKey {
+  id: string;
+  /** The full plaintext key. Shown once; never retrievable again. */
+  key: string;
+  keyPrefix: string;
+  name: string;
+  scopes: string[];
+}
+
+export interface ResolvedApiKey {
+  keyId: string;
+  userId: string;
+  organizationId: string | null;
+  email: string;
+  role: string;
+  scopes: string[];
+}
+
+export const apiKeyService = {
+  /** Mint a new key for a user. Returns the plaintext exactly once. */
+  async mint(params: {
+    userId: string;
+    name: string;
+    scopes?: string[];
+  }): Promise<MintedApiKey> {
+    const raw = generateMcpToken("sk");
+    const keyPrefix = raw.slice(0, KEY_PREFIX_LENGTH);
+    const scopes = normalizeMcpScopes(params.scopes ?? []);
+
+    const row = await db
+      .insertInto("api_credentials")
+      .values({
+        userId: params.userId,
+        name: params.name,
+        keyHash: hashMcpToken(raw),
+        keyPrefix,
+        scopes,
+      })
+      .returning(["id"])
+      .executeTakeFirstOrThrow();
+
+    log.info("API key minted", {
+      source: "api-keys",
+      userId: params.userId,
+      keyPrefix,
+    });
+
+    return { id: row.id, key: raw, keyPrefix, name: params.name, scopes };
+  },
+
+  /**
+   * Resolve a presented raw key to its owner, or null. Prefix-indexed lookup
+   * first, then a constant-time hash comparison. Org resolved live from
+   * `users`.
+   */
+  async verify(rawKey: string): Promise<ResolvedApiKey | null> {
+    if (!rawKey.startsWith("mcp_sk_")) return null;
+    const keyPrefix = rawKey.slice(0, KEY_PREFIX_LENGTH);
+    const presentedHash = hashMcpToken(rawKey);
+
+    const candidates = await db
+      .selectFrom("api_credentials as k")
+      .innerJoin("users as u", "u.id", "k.userId")
+      .where("k.keyPrefix", "=", keyPrefix)
+      .where("k.isActive", "=", true)
+      .select([
+        "k.id as keyId",
+        "k.keyHash as keyHash",
+        "k.scopes as scopes",
+        "u.id as userId",
+        "u.organizationId as organizationId",
+        "u.email as email",
+        "u.role as role",
+      ])
+      .execute();
+
+    for (const row of candidates) {
+      const a = Buffer.from(presentedHash, "hex");
+      const b = Buffer.from(row.keyHash, "hex");
+      if (a.length === b.length && timingSafeEqual(a, b)) {
+        // Best-effort last-used stamp; never blocks the request.
+        db.updateTable("api_credentials")
+          .set({ lastUsedAt: new Date() })
+          .where("id", "=", row.keyId)
+          .execute()
+          .catch((e) => {
+            log.warn("API key last-used stamp failed", {
+              source: "api-keys",
+              keyId: row.keyId,
+            }, e instanceof Error ? e : new Error(String(e)));
+          });
+
+        return {
+          keyId: row.keyId,
+          userId: row.userId,
+          organizationId: row.organizationId,
+          email: row.email,
+          role: row.role,
+          scopes: normalizeMcpScopes(parseScopes(row.scopes)),
+        };
+      }
+    }
+    return null;
+  },
+
+  /** List a user's keys (prefix + metadata only -- never the hash). */
+  async listForUser(userId: string) {
+    return await db
+      .selectFrom("api_credentials")
+      .select(["id", "name", "keyPrefix", "scopes", "isActive", "lastUsedAt", "createdAt"])
+      .where("userId", "=", userId)
+      .orderBy("createdAt", "desc")
+      .execute();
+  },
+
+  /** Revoke (deactivate) a key. Scoped to the owning user. Idempotent. */
+  async revoke(keyId: string, userId: string): Promise<void> {
+    await db
+      .updateTable("api_credentials")
+      .set({ isActive: false })
+      .where("id", "=", keyId)
+      .where("userId", "=", userId)
+      .execute();
+  },
+};
+
+function parseScopes(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === "string");
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}

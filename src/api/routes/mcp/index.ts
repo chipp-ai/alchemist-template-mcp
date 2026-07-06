@@ -31,6 +31,7 @@
 import { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@/mcp/server.ts";
+import { mcpAuthMiddleware } from "@/api/middleware/mcp-auth.ts";
 
 const mcpRoutes = new Hono();
 
@@ -65,9 +66,10 @@ function isOriginAllowed(req: Request): boolean {
   return allowedOrigins().has(origin.toLowerCase());
 }
 
-mcpRoutes.all("/", async (c) => {
-  // Reject cross-site browser requests (DNS rebinding / CSRF) before doing
-  // any work. JSON-RPC-shaped error so MCP clients get a sensible body.
+// Origin guard runs BEFORE auth so cross-site browser requests are rejected
+// without any DB work. JSON-RPC-shaped error so MCP clients get a sensible
+// body.
+mcpRoutes.use("/", async (c, next) => {
   if (!isOriginAllowed(c.req.raw)) {
     return c.json(
       {
@@ -78,7 +80,10 @@ mcpRoutes.all("/", async (c) => {
       403,
     );
   }
+  await next();
+});
 
+mcpRoutes.all("/", mcpAuthMiddleware, async (c) => {
   // Fresh server + transport per request (stateless mode)
   const server = createMcpServer();
   const transport = new WebStandardStreamableHTTPServerTransport({

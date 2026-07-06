@@ -95,7 +95,8 @@ export interface ApiCredentialsTable {
   name: string;
   keyHash: string;
   keyPrefix: string;
-  scopes: string | null; // JSONB stored as string
+  /** JSONB string[] -- may arrive as an array or a JSON string. Pass arrays on write. */
+  scopes: unknown;
   isActive: Generated<boolean>;
   lastUsedAt: ColumnType<Date | null, Date | null | undefined, Date | null | undefined>;
   createdAt: CreatedAt;
@@ -191,6 +192,67 @@ export type DocSearchIndexRow = Selectable<DocSearchIndexTable>;
 export type NewDocSearchIndexRow = Insertable<DocSearchIndexTable>;
 export type DocSearchIndexUpdate = Updateable<DocSearchIndexTable>;
 
+
+// ── MCP OAuth (authorization server for /api/mcp) ──
+
+/** RFC 7591 dynamically-registered OAuth client (public, PKCE-only). */
+export interface McpOauthClientsTable {
+  id: Generated<string>;
+  clientId: string;
+  name: string;
+  description: string | null;
+  /** JSONB string[] -- may arrive as an array or a JSON string. */
+  redirectUris: unknown;
+  clientType: Generated<string>;
+  isActive: Generated<boolean>;
+  createdAt: CreatedAt;
+  updatedAt: UpdatedAt;
+}
+
+export type McpOauthClient = Selectable<McpOauthClientsTable>;
+export type NewMcpOauthClient = Insertable<McpOauthClientsTable>;
+
+/** Single-use, PKCE-bound authorization code (5-minute TTL). */
+export interface McpOauthAuthCodesTable {
+  id: Generated<string>;
+  codeHash: string;
+  userId: string;
+  clientId: string;
+  redirectUri: string;
+  /** JSONB string[]. */
+  scopes: unknown;
+  codeChallenge: string;
+  codeChallengeMethod: Generated<string>;
+  isUsed: Generated<boolean>;
+  expiresAt: Date;
+  createdAt: CreatedAt;
+}
+
+export type McpOauthAuthCode = Selectable<McpOauthAuthCodesTable>;
+export type NewMcpOauthAuthCode = Insertable<McpOauthAuthCodesTable>;
+
+/** Access (1h) + refresh (30d, rotated) token pair. Hashes only. */
+export interface McpOauthTokensTable {
+  id: Generated<string>;
+  accessTokenHash: string;
+  refreshTokenHash: string;
+  userId: string;
+  clientId: string;
+  /** JSONB string[]. */
+  scopes: unknown;
+  accessTokenExpiresAt: Date;
+  refreshTokenExpiresAt: Date;
+  isRevoked: Generated<boolean>;
+  userAgent: string | null;
+  ipAddress: string | null;
+  lastUsedAt: ColumnType<Date | null, Date | null | undefined, Date | null | undefined>;
+  createdAt: CreatedAt;
+  updatedAt: UpdatedAt;
+}
+
+export type McpOauthToken = Selectable<McpOauthTokensTable>;
+export type NewMcpOauthToken = Insertable<McpOauthTokensTable>;
+
 export interface Database {
   organizations: OrganizationsTable;
   users: UsersTable;
@@ -201,4 +263,7 @@ export interface Database {
   token_usage: TokenUsageTable;
   job_history: JobHistoryTable;
   doc_search_index: DocSearchIndexTable;
+  mcp_oauth_clients: McpOauthClientsTable;
+  mcp_oauth_auth_codes: McpOauthAuthCodesTable;
+  mcp_oauth_tokens: McpOauthTokensTable;
 }
