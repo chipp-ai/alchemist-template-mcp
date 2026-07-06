@@ -150,12 +150,24 @@ Invariants (each backed by a test in `mcp_oauth_service_test.ts` /
   issuer to match the fetched URL) -- never hardcode it.
 - Tokens are user-scoped; the org is resolved live from `users` at lookup.
 
-### Paid tools -- MPP (Stripe machine payments)
+### Monetized tools -- entitlements, credits, and MPP
 
-Any registered tool can charge per call: add a `price` to `registerMcpTool`
-and the payment gate in `src/mcp/server.ts` does the rest. See
-`src/mcp/tools/premium_echo.ts` for the pattern and the "Paid tools" section
-of CLAUDE.md for the full contract (env vars, wire shape, receipts).
+Three knobs on `registerMcpTool`, one per business model:
+
+- `requiredProductKey` -- the org must own a product (subscription or
+  one-time unlock). Unentitled calls return a Stripe Checkout link the agent
+  relays to its human; the webhook fulfills; the retry succeeds.
+- `creditCost` -- prepaid metering: atomic per-call debit against the org's
+  credit balance; insufficient balance returns a top-up checkout link for a
+  `grantsCredits` credit-pack product; failed runs are refunded.
+- `price` -- MPP machine payments for programmatic agents (per-call fiat via
+  Shared Payment Tokens or USDC on Tempo; signed challenges + credentials in
+  `_meta`). Mutually exclusive with `creditCost`.
+
+The first two need identity (`MCP_AUTH_MODE=oauth`) and ride the products/
+purchases/credits layer under `/api/billing/*`. See
+`src/mcp/tools/premium_echo.ts` for the MPP pattern and CLAUDE.md
+"Monetized tools" for the full contract.
 
 ## Public contract
 
@@ -169,6 +181,9 @@ GET  /.well-known/oauth-protected-resource     RFC 9728 PRM (advertised on 401)
 POST /api/mcp/oauth/{authorize,token,register,revoke}   OAuth 2.1 AS
 GET  /api/mcp/oauth/authorize                  server-rendered login/consent
 POST /api/api-keys                             mint an API key (session auth)
+GET/POST /api/billing/products                 sales catalog (billing.manage to write)
+GET  /api/billing/{purchases,entitlements,credits}   org purchase/entitlement/credit state
+GET  /api/billing/purchase/complete            checkout return page (tool-gate funnel)
 
 Env: MCP_ALLOWED_ORIGINS  comma-separated browser origins to allowlist (default: none)
      MCP_AUTH_MODE        public (default) | oauth

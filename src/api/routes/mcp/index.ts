@@ -31,7 +31,8 @@
 import { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@/mcp/server.ts";
-import { mcpAuthMiddleware } from "@/api/middleware/mcp-auth.ts";
+import { getMcpAuth, mcpAuthMiddleware } from "@/api/middleware/mcp-auth.ts";
+import { requestBaseUrl } from "@/api/routes/well-known.ts";
 
 const mcpRoutes = new Hono();
 
@@ -84,8 +85,12 @@ mcpRoutes.use("/", async (c, next) => {
 });
 
 mcpRoutes.all("/", mcpAuthMiddleware, async (c) => {
-  // Fresh server + transport per request (stateless mode)
-  const server = createMcpServer();
+  // Fresh server + transport per request (stateless mode). The resolved
+  // caller identity + request base URL feed the monetization gates.
+  const server = createMcpServer({
+    auth: getMcpAuth(c),
+    baseUrl: requestBaseUrl(c),
+  });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });

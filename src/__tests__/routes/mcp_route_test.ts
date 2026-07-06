@@ -463,3 +463,240 @@ deno(
     assertEquals(content[0].text, "still free");
   }),
 );
+
+// ── Monetization gates: entitlements + credits (interactive-client lanes) ───
+//
+// These use Bearer identity (works in the default public mode too -- the
+// middleware RESOLVES presented tokens even when not required), so no env
+// mutation is needed. Test tools registered here use unique names; earlier
+// tools/list assertions only check inclusion, so registry growth is safe.
+
+import { z } from "zod";
+import { registerMcpTool } from "@/mcp/registry.ts";
+import { creditService } from "@/services/credit.service.ts";
+import { recordProductPurchase } from "@/services/product.service.ts";
+import { db } from "@/db/client.ts";
+
+async function insertTestProduct(productKey: string, opts: {
+  type?: "one_time" | "subscription";
+  grantsCredits?: number | null;
+} = {}): Promise<string> {
+  const row = await db
+    .insertInto("products")
+    .values({
+      productKey,
+      name: `Test ${productKey}`,
+      description: null,
+      type: opts.type ?? "one_time",
+      priceCents: 1900,
+      currency: "usd",
+      billingInterval: opts.type === "subscription" ? "month" : null,
+      stripeProductId: null,
+      stripePriceId: "price_test_gate",
+      grantsCredits: opts.grantsCredits ?? null,
+    })
+    .returning(["id"])
+    .executeTakeFirstOrThrow();
+  return row.id;
+}
+
+async function deleteTestProduct(productId: string): Promise<void> {
+  await db.deleteFrom("purchases").where("productId", "=", productId).execute();
+  await db.deleteFrom("products").where("id", "=", productId).execute();
+}
+
+async function callToolAs(bearer: string | null, name: string, args: Record<string, unknown>) {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+  };
+  if (bearer) headers.authorization = `Bearer ${bearer}`;
+  const res = await app.request("/api/mcp", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: args },
+    }),
+  });
+  const text = await res.text();
+  const match = text.match(/data:\s*(\{[\s\S]*\})/);
+  const json = match ? JSON.parse(match[1]) as Record<string, unknown> : null;
+  return { res, json };
+}
+
+registerMcpTool({
+  name: "gated_echo_test",
+  description: "Entitlement-gated test tool.",
+  inputSchema: { message: z.string() },
+  requiredProductKey: "gate_test_product",
+  handler: async (args) => ({
+    content: [{ type: "text", text: `[gated] ${String(args.message)}` }],
+  }),
+});
+
+registerMcpTool({
+  name: "credit_echo_test",
+  description: "Credit-priced test tool.",
+  inputSchema: { message: z.string() },
+  creditCost: 5,
+  handler: async (args) => ({
+    content: [{ type: "text", text: `[credit] ${String(args.message)}` }],
+  }),
+});
+
+registerMcpTool({
+  name: "credit_fail_test",
+  description: "Credit-priced tool that always fails (refund path).",
+  inputSchema: {},
+  creditCost: 5,
+  handler: () => {
+    throw new Error("intentional test failure");
+  },
+});
+
+deno("mcp gates: registry rejects price + creditCost on one tool", () => {
+  let threw = false;
+  try {
+    registerMcpTool({
+      name: "conflicting_lanes_test",
+      description: "x",
+      inputSchema: {},
+      price: { fiatUsd: "0.50" },
+      creditCost: 1,
+      handler: async () => ({ content: [] }),
+    });
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true, "price + creditCost must be rejected at registration");
+});
+
+deno("mcp gates: entitlement tool blocks anonymous callers with connect guidance", async () => {
+  const { json } = await callToolAs(null, "gated_echo_test", { message: "hi" });
+  const result = (json as Record<string, unknown>).result as Record<string, unknown>;
+  assertEquals(result.isError, true);
+  const text = String((result.content as Array<Record<string, unknown>>)[0]?.text ?? "");
+  assertEquals(text.includes("requires a signed-in account"), true);
+  assertEquals(text.includes("[gated]"), false, "tool must not run");
+});
+
+deno("mcp gates: unentitled org is blocked; a purchase unlocks the tool", async () => {
+  const { user, org, cleanup } = await createIsolatedUser("owner");
+  const productId = await insertTestProduct("gate_test_product");
+  try {
+    const key = await apiKeyService.mint({ userId: user.id, name: "gate test" });
+
+    // Unentitled -> blocked. Stripe is unconfigured in tests, so the funnel
+    // degrades to the honest no-checkout-link message (never a crash).
+    const blocked = await callToolAs(key.key, "gated_echo_test", { message: "locked" });
+    const blockedResult = (blocked.json as Record<string, unknown>).result as Record<
+      string,
+      unknown
+    >;
+    assertEquals(blockedResult.isError, true);
+    const blockedText = String(
+      (blockedResult.content as Array<Record<string, unknown>>)[0]?.text ?? "",
+    );
+    assertEquals(blockedText.includes("[gated]"), false, "tool must not run unentitled");
+    assertEquals(
+      blockedText.includes("Purchase required") || blockedText.includes("checkout could not"),
+      true,
+      `expected purchase-funnel wording, got: ${blockedText}`,
+    );
+
+    // The webhook records a purchase -> the SAME call now succeeds.
+    await recordProductPurchase({
+      organizationId: org.id,
+      productId,
+      checkoutSessionId: `cs_gate_${org.id}`,
+      amountCents: 1900,
+    });
+    const unlocked = await callToolAs(key.key, "gated_echo_test", { message: "open" });
+    const unlockedResult = (unlocked.json as Record<string, unknown>).result as Record<
+      string,
+      unknown
+    >;
+    const unlockedText = String(
+      (unlockedResult.content as Array<Record<string, unknown>>)[0]?.text ?? "",
+    );
+    assertEquals(unlockedText, "[gated] open");
+
+    // tools/list advertises the requirement.
+    const listRes = await app.request("/api/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+    });
+    const listText = await listRes.text();
+    assertEquals(listText.includes("REQUIRES PURCHASE"), true);
+  } finally {
+    await deleteTestProduct(productId);
+    await cleanup();
+  }
+});
+
+deno("mcp gates: credit tool debits per call, blocks at zero with top-up funnel", async () => {
+  const { user, org, cleanup } = await createIsolatedUser("owner");
+  const packId = await insertTestProduct(`credits_pack_${org.id}`, { grantsCredits: 100 });
+  try {
+    const key = await apiKeyService.mint({ userId: user.id, name: "credit test" });
+
+    // Zero balance -> blocked with the top-up funnel (no Stripe in tests ->
+    // degrades to the honest fallback line, never a crash).
+    const broke = await callToolAs(key.key, "credit_echo_test", { message: "x" });
+    const brokeResult = (broke.json as Record<string, unknown>).result as Record<string, unknown>;
+    assertEquals(brokeResult.isError, true);
+    const brokeText = String(
+      (brokeResult.content as Array<Record<string, unknown>>)[0]?.text ?? "",
+    );
+    assertEquals(brokeText.includes("Insufficient credits"), true);
+    assertEquals(brokeText.includes("[credit]"), false);
+
+    // Grant 12 -> call succeeds (costs 5) -> balance 7.
+    await creditService.grant({
+      organizationId: org.id,
+      amount: 12,
+      reason: "test_grant",
+      externalRef: `t:${org.id}:gate`,
+    });
+    const okCall = await callToolAs(key.key, "credit_echo_test", { message: "meter" });
+    const okResult = (okCall.json as Record<string, unknown>).result as Record<string, unknown>;
+    assertEquals(
+      String((okResult.content as Array<Record<string, unknown>>)[0]?.text ?? ""),
+      "[credit] meter",
+    );
+    assertEquals(await creditService.getBalance(org.id), 7n);
+
+    // A failing tool run refunds the debit (charge -> run -> refund).
+    const failCall = await callToolAs(key.key, "credit_fail_test", {});
+    const failResult = (failCall.json as Record<string, unknown>).result as Record<
+      string,
+      unknown
+    >;
+    assertEquals(failResult.isError, true, "SDK surfaces the handler error as isError");
+    assertEquals(
+      await creditService.getBalance(org.id),
+      7n,
+      "failed run must refund the debit",
+    );
+
+    // Second success spends down to 2; a third (5 > 2) is blocked.
+    await callToolAs(key.key, "credit_echo_test", { message: "again" });
+    assertEquals(await creditService.getBalance(org.id), 2n);
+    const blocked = await callToolAs(key.key, "credit_echo_test", { message: "nope" });
+    const blockedResult = (blocked.json as Record<string, unknown>).result as Record<
+      string,
+      unknown
+    >;
+    assertEquals(blockedResult.isError, true);
+  } finally {
+    await deleteTestProduct(packId);
+    await cleanup();
+  }
+});

@@ -88,6 +88,13 @@ deno("capabilities: viewer has read but no write/team/org actions", () => {
   assertEquals(can("viewer", "team.update_role"), false);
   assertEquals(can("viewer", "team.remove"), false);
   assertEquals(can("viewer", "org.update"), false);
+  assertEquals(can("viewer", "billing.manage"), false);
+});
+
+deno("capabilities: admin can manage billing (product catalog)", () => {
+  assertEquals(can("admin", "billing.manage"), true);
+  assertEquals(can("owner", "billing.manage"), true);
+  assertEquals(can("editor", "billing.manage"), false);
 });
 
 deno("capabilities: editor has write but no team/org actions", () => {

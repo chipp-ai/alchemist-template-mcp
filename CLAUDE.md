@@ -166,11 +166,11 @@ and use the resolved identity -- never hand-roll a new token system.**
 | API keys (`mcp_sk_`, secondary; mint via `POST /api/api-keys`) | `src/services/api-key.service.ts` |
 | Tables | `mcp_oauth_clients` / `mcp_oauth_auth_codes` / `mcp_oauth_tokens` + existing `api_credentials` |
 
-Today's tools are identity-free by design (the registry handler receives only
-validated args). When a ticket needs per-user tool behavior, run under
-`MCP_AUTH_MODE=oauth` and thread the middleware's resolved `McpAuthContext`
-(`getMcpAuth(c)` in the route) into `createMcpServer()`/the handlers as part
-of that ticket -- extend the seam, don't invent a parallel auth path.
+The route already threads the resolved identity into the server factory:
+`createMcpServer({ auth: getMcpAuth(c), baseUrl: requestBaseUrl(c) })`. The
+monetization gates consume it (below); tool HANDLERS still receive only
+validated args by design -- when a ticket needs per-user behavior inside a
+handler, extend that same seam (pass `auth` through), never a parallel path.
 
 Invariants: tokens/codes are stored as SHA-256 hashes only; auth codes are
 single-use + PKCE-bound; refresh rotation is strict; the discovery `issuer`
@@ -178,12 +178,43 @@ derives from the request host (RFC 8414) -- never hardcode it; the 401
 challenge's `resource_metadata` points at the RFC 9728 PRM URL, never the
 AS metadata URL.
 
-### Paid tools -- MPP machine payments via Stripe (do NOT rebuild)
+### Monetized tools -- three lanes (do NOT rebuild any of them)
 
-Any tool can charge per call. Add a `price` to `registerMcpTool` and the
-payment gate in `src/mcp/server.ts` handles challenge, verification,
-charging, and receipts (MPP -- Stripe's Machine Payments Protocol,
-https://docs.stripe.com/payments/machine/mpp, npm package `mppx`):
+`registerMcpTool` has three monetization knobs. **When a ticket says "charge
+for this tool", "make this premium", or "meter usage", pick a lane -- never
+hand-roll Stripe calls, entitlement checks, or a credit system.**
+
+| Knob | Lane | Buyer | Requires |
+|---|---|---|---|
+| `requiredProductKey: "pro"` | Entitlement (subscription or one-time unlock) | Interactive clients (Claude Desktop, claude.ai) | `MCP_AUTH_MODE=oauth`; a product with that key (products layer below) |
+| `creditCost: 5` | Prepaid credits, debited per call | Interactive clients | `MCP_AUTH_MODE=oauth`; credit-pack products (`grantsCredits`) to top up |
+| `price: { fiatUsd, cryptoUsd }` | MPP machine payments, paid per call | Programmatic agents with wallets | MPP env (below); no account needed |
+
+`requiredProductKey` combines with either metered lane; `price` and
+`creditCost` are mutually exclusive (validated at registration). Gates run
+in `src/mcp/gates.ts` + `src/mcp/server.ts`; every failure is a NORMAL tool
+result with honest wording. The entitlement/credit failures carry a
+**server-minted Stripe Checkout link the agent relays to its human** -- the
+agentic purchase funnel: pay, webhook fulfills, retry succeeds (return page:
+`GET /api/billing/purchase/complete`). Credit debits are atomic
+(`credit.service.ts`, conditional UPDATE, never negative) and refunded when
+the tool run throws. Grants are idempotent: one-time packs on
+`checkout.session.completed` (`cs:{id}`), subscription allowances on EVERY
+`invoice.paid` (`inv:{id}`) -- never both, or the first period double-grants.
+
+The PRODUCTS layer behind the first two lanes is the same one the web-app
+template ships: `products` + `purchases` tables, auto-created Stripe
+Product/Price, `/api/billing/products|purchases|entitlements|credits`
+routes, `billing.manage` capability, idempotent webhook fulfillment, and
+the invariant that product subscriptions NEVER touch
+`organizations.subscription_tier` (routing on `metadata.productId`).
+Operators create products via `POST /api/billing/products` -- no Stripe
+dashboard steps.
+
+### MPP lane details (Stripe machine payments)
+
+MPP -- Stripe's Machine Payments Protocol
+(https://docs.stripe.com/payments/machine/mpp, npm package `mppx`):
 
 ```ts
 registerMcpTool({

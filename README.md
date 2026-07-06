@@ -32,7 +32,7 @@ It is also the seed repo every customer project on the [Alchemist AI](https://ad
 - **Database** -- PostgreSQL via Kysely with `CamelCasePlugin` (camelCase in TS, snake_case in SQL). Migrations are plain SQL files in `db/migrations/`, auto-applied on startup.
 - **Cache + sessions** -- Redis, with helpers for rate limits and key-scoped invalidation.
 - **Auth** -- Email OTP login, session cookies, JWT for API tokens, OAuth providers via Arctic 2. Includes a documented dev-login escape hatch so local + agent testing works without an SMTP inbox.
-- **Billing** -- Stripe 17. Plan-tier subscriptions + customer portal, AND per-call PAID MCP TOOLS via MPP (Stripe machine payments): price a tool in fiat (Shared Payment Tokens) or USDC and agents pay per invocation. See docs/mcp-server.md.
+- **Billing** -- Stripe 17. Plan-tier subscriptions + customer portal, a product catalog (one-time + recurring, auto-created Stripe Products/Prices, webhook fulfillment, org entitlements), prepaid credits (atomic ledger, credit-pack top-ups, per-cycle allowances), and THREE monetized-tool lanes: entitlement-gated tools, credit-priced tools (both return Stripe Checkout links agents relay to their humans), and per-call MPP machine payments (fiat SPTs or USDC) for programmatic agents. See docs/mcp-server.md.
 - **Email** -- SMTP via nodemailer with environment-driven configuration.
 - **RBAC + teams** -- Organizations, members, roles, invites. Wired through the auth middleware and routes.
 - **Logging** -- Structured logger (pretty in dev, NDJSON in production), ready for Loki / Datadog / any aggregator.
