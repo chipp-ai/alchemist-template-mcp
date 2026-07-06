@@ -535,6 +535,71 @@ this for `*.adaas.dev` automatically — see chipp-ai/alchemist-ai
 adds the origin to the bucket-level rule when the customer registers
 the domain (see `R2 Bucket CORS` in alchemist-ai/CLAUDE.md).
 
+## Inbound email ingestion: built-in pipeline (do NOT rebuild this)
+
+The template ships a dormant email-ingestion substrate: a purpose-built
+address receives operational email (PDFs, spreadsheets, status updates) and
+an LLM projects it into YOUR domain tables. **When a ticket says "ingest
+emails", "process the ops inbox", "extract data from forwarded emails", or
+"parse email attachments into the DB", wire it through this pipeline --
+never build a new webhook receiver, IMAP poller, or extraction loop.**
+
+The flow (all shipped, all dormant until configured):
+
+```
+Postmark inbound webhook -> POST /api/ingest/email?token=...   (fail-closed gate)
+  -> capture.service.ts: dedup on Message-ID, attachments to R2,
+     inbound_email + inbound_email_attachment rows, status='received'
+  -> src/jobs/inbound-email-reaper.ts (60s loop, advisory lock)
+  -> extract.service.ts: LLM triage into { <your data> | human_message | unclear }
+  -> YOUR extraction profile's applyData() -> your domain tables
+  -> /api/inbound-emails dashboard API (list/detail, signed attachment URLs)
+```
+
+**Your ONE integration point is an extraction profile**
+(`src/services/inbound-email/profile.ts`):
+
+```ts
+registerInboundEmailExtractionProfile({
+  dataKind: "invoice_data",              // discriminator for the domain variant
+  dataSchema: z.object({ ... }),         // zod schema the LLM must fill
+  extractionInstructions: "...",         // domain guidance appended to the triage prompt
+  applyData: async ({ orgId, emailId, data }) => {
+    // Idempotent, keyed on emailId (the reaper re-runs failed rows).
+    // Recommended dedup key for downstream writes: `email:<emailId>|...`
+    return { applied: n, summary: "..." };
+  },
+});
+```
+
+Register it once at boot (import from `main.ts` or a service init). Schema
+rules (each prevents a real failure mode): LLM-optional fields are
+`.nullish()` never `.optional()`; soft descriptive fields truncate (see
+`softText` in extract.service.ts) rather than reject.
+
+Invariants:
+
+- **Never bypass the capture-first contract.** Extraction is a re-runnable
+  projection over durably captured rows; if extraction logic changes, rows
+  can be re-processed. Do not extract inline in the webhook handler.
+- **`INGEST_EMAIL_TOKEN` unset = endpoint OFF** (fails closed). The
+  platform mints the token and provisions the Postmark inbound address +
+  MX record; do not hand-roll either.
+- **Set `INGEST_ORG_ID`** in production: captured rows are attributed to
+  that org and the dashboard API is org-scoped (NULL-org rows are
+  invisible).
+- **Attachments live in R2 via `storage.service.ts` relative keys**; the
+  key folder is a hash of the Message-ID (attacker-controlled input must
+  not choose object paths). Disallowed/oversized attachments are recorded
+  with an empty `r2_key` sentinel, never dropped.
+- The extraction LLM call runs through the platform billing proxy
+  (`LLM_CONFIG`); a 402 credits-exhausted response backs off for 3 days
+  automatically.
+- `bodyHtml` returned by `/api/inbound-emails/:id` is UNTRUSTED email
+  HTML. This template is headless (no web/ SPA), so any client you build
+  on this API must render it ONLY inside a `sandbox=""` iframe with a CSP
+  that blocks remote loads -- never inject it into a page as innerHTML.
+
 ## Browser automation / portal scraping: a platform capability (do NOT build it here)
 
 When a ticket asks to log into a third-party web portal, scrape data from
