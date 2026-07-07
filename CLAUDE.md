@@ -330,6 +330,23 @@ Dev-only — the entire pipeline no-ops when `NODE_ENV === "production"`. The an
 > and member removal is a SOFT-DISCONNECT (`organization_id = NULL`), never a
 > hard delete.
 
+### Human-viewable docs at `/docs` (server-rendered HTML)
+
+This headless template has no SPA, so human-viewable docs are served as
+server-rendered HTML at `/docs` (index) and `/docs/:slug`
+(`src/api/routes/docs-html/index.ts`), mounted PUBLIC in `app.ts`. Content is
+the SAME `docs/in-app/*.md` files + `DOCS_PAGES` registry
+(`src/services/docs/registry.ts`) that power the auth-required JSON API at
+`/api/docs` -- add a page by dropping markdown in `docs/in-app/` and
+registering it; the boot-time reindexer picks it up for semantic search
+automatically. Registry entries with `requiresAuth: true` get a uniform 404 on
+the HTML surface unless a session cookie is present. `/docs/tools` enumerates
+the LIVE registered MCP tools (via `listMcpTools()` + a side-effect import of
+`src/mcp/server.ts`, the same registry `/api/mcp` serves) -- never hardcode a
+tool list in docs. The renderer (`src/services/docs/render-html.ts`) is the
+SECURITY BOUNDARY: escape-first, no raw-HTML passthrough, allowlisted link
+schemes only -- never render docs markdown to HTML any other way.
+
 ## Database Conventions
 
 > **Detailed database rules live in `.claude/rules/database.md`** (Postgres

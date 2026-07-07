@@ -26,6 +26,7 @@ import { inviteRoutes } from "@/api/routes/invite/index.ts";
 import { realtimeRoutes } from "@/api/routes/realtime/index.ts";
 import { observabilityRoutes } from "@/api/routes/observability/index.ts";
 import { docsRoutes } from "@/api/routes/docs/index.ts";
+import { docsHtmlRoutes } from "@/api/routes/docs-html/index.ts";
 import { ingestEmailRoutes } from "@/api/routes/ingest-email/index.ts";
 import { inboundEmailRoutes } from "@/api/routes/inbound-emails/index.ts";
 import { devRoutesEnabled } from "@/lib/dev-mode.ts";
@@ -111,6 +112,12 @@ app.route("/api/billing", billingRoutes);
 // internal). Content is static (the registry); search is served from
 // the boot-built index (src/services/docs/). See docs/in-app/.
 app.route("/api/docs", docsRoutes);
+
+// Human-viewable docs (PUBLIC, server-rendered HTML -- no SPA in this
+// template). Same registry + markdown as /api/docs; pages flagged
+// requiresAuth in the registry 404 without a session. Includes the live
+// /docs/tools MCP tool reference. See src/api/routes/docs-html/index.ts.
+app.route("/docs", docsHtmlRoutes);
 
 // File storage (R2 — tenant-isolated via R2_KEY_PREFIX, see
 // src/services/storage.service.ts). Auth-required. Provides
