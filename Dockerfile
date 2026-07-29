@@ -29,8 +29,12 @@ RUN addgroup --system --gid 1001 deno-app && \
 
 # Copy compiled application (headless — no web/dist/ SPA bundle).
 COPY --chown=deno-app:deno-app --from=builder /app .
-# Copy cached Deno dependencies
-COPY --chown=deno-app:deno-app --from=builder /root/.cache/deno /home/deno-app/.cache/deno
+# Copy cached Deno dependencies. The denoland/deno base image sets
+# DENO_DIR=/deno-dir/ (NOT the /root/.cache/deno default used when DENO_DIR
+# is unset) — both stages inherit that ENV, so the cache built by `deno
+# cache` / `deno check` in the builder stage lives at /deno-dir/. Copying
+# from /root/.cache/deno silently failed the build (path never existed).
+COPY --chown=deno-app:deno-app --from=builder /deno-dir /deno-dir
 
 USER deno-app
 
