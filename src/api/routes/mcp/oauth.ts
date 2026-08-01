@@ -20,6 +20,13 @@
  * page posts to the EXISTING /api/auth/send-otp + /verify-otp endpoints
  * (same origin) and reloads -- no duplicate auth implementation.
  *
+ * Both the login and consent pages carry the Chipp Insights beacon tag
+ * (INSIGHTS_BEACON_SCRIPT_TAG, see src/lib/insights-beacon.ts -- a no-op
+ * empty string when the project has no chipp-insights.json). This is the
+ * only "successful login" moment this headless template has in a browser
+ * context, so the login page's verify-otp success handler also fires
+ * `window.chippInsights?.identify(email)`.
+ *
  * Modeled on the Alchemist platform's own MCP OAuth server.
  */
 
@@ -27,6 +34,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { authMiddleware, type AuthUser } from "@/api/middleware/auth.ts";
 import { escapeHtmlText } from "@/utils/html-escape.ts";
+import { INSIGHTS_BEACON_SCRIPT_TAG } from "@/lib/insights-beacon.ts";
 import { log } from "@/lib/logger.ts";
 import { BRAND } from "@/config/brand.ts";
 import {
@@ -371,7 +379,9 @@ function renderConsentPage(p: ConsentParams): string {
   const desc = p.clientDescription ? `<p>${p.clientDescription}</p>` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Authorize ${p.clientName} — ${brand}</title><style>${PAGE_STYLE}</style></head>
+<title>Authorize ${p.clientName} — ${brand}</title><style>${PAGE_STYLE}</style>
+${INSIGHTS_BEACON_SCRIPT_TAG}
+</head>
 <body><div class="card">
 <h1>Connect ${p.clientName}</h1>
 ${desc}
@@ -403,7 +413,9 @@ function renderLoginPage(clientName: string): string {
   const brand = escapeHtmlText(BRAND.name);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in — ${brand}</title><style>${PAGE_STYLE}</style></head>
+<title>Sign in — ${brand}</title><style>${PAGE_STYLE}</style>
+${INSIGHTS_BEACON_SCRIPT_TAG}
+</head>
 <body><div class="card">
 <h1>Sign in to continue</h1>
 <p>To connect <strong>${clientName}</strong> to ${brand}, verify your email. We'll send you a
@@ -449,10 +461,14 @@ function renderLoginPage(clientName: string): string {
   document.getElementById("verify-btn").addEventListener("click", async function () {
     err("code-error", "");
     try {
+      var loginEmail = emailEl.value.trim().toLowerCase();
       await post("/api/auth/verify-otp", {
-        email: emailEl.value.trim().toLowerCase(),
+        email: loginEmail,
         otpCode: codeEl.value.trim(),
       });
+      if (window.chippInsights && window.chippInsights.identify) {
+        window.chippInsights.identify(loginEmail);
+      }
       location.reload();
     } catch (e) { err("code-error", e.message); }
   });

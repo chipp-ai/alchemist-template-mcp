@@ -28,6 +28,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { z } from "zod";
 import { BRAND } from "@/config/brand.ts";
+import { INSIGHTS_BEACON_SCRIPT_TAG } from "@/lib/insights-beacon.ts";
 import { authMiddleware } from "@/api/middleware/auth.ts";
 import { DOCS_PAGES, type DocPage, findDoc } from "@/services/docs/registry.ts";
 import { escapeHtml, renderMarkdownToHtml } from "@/services/docs/render-html.ts";
@@ -105,6 +106,7 @@ function shell(title: string, content: string): string {
   footer { border-top: 1px solid #e5e7eb; }
   footer .inner { padding-top: 1rem; padding-bottom: 1.5rem; color: #6b7280; font-size: 0.85rem; }
 </style>
+${INSIGHTS_BEACON_SCRIPT_TAG}
 </head>
 <body>
 <header><div class="inner"><a href="/docs">${brandName}</a><span class="crumb">Documentation</span></div></header>

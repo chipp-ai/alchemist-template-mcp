@@ -347,6 +347,47 @@ tool list in docs. The renderer (`src/services/docs/render-html.ts`) is the
 SECURITY BOUNDARY: escape-first, no raw-HTML passthrough, allowlisted link
 schemes only -- never render docs markdown to HTML any other way.
 
+### Chipp Insights beacon (`src/lib/insights-beacon.ts`)
+
+Every Alchemist customer template carries the same first-party browser
+analytics wiring: when a `chipp-insights.json` file (shaped
+`{"telemetryPublicKey": "tk_pub_..."}`) exists at the repo root -- written by
+the Alchemist platform at provisioning time, absent in local dev and in any
+un-provisioned project -- the served HTML pages load
+`https://build.chipp.ai/i/beacon.js` and identify the signed-in user after a
+successful login.
+
+This template is headless (no SPA), but it still serves TWO real
+browser-facing HTML surfaces, and both carry the beacon:
+
+- **`/docs`, `/docs/:slug`, `/docs/tools`** -- the public docs shell
+  (`src/api/routes/docs-html/index.ts`, `shell()`). The script tag is spliced
+  before `</head>` unconditionally; it's an empty string when
+  `chipp-insights.json` is absent.
+- **`GET /api/mcp/oauth/authorize`** -- the server-rendered email-OTP login
+  page and the consent page (`src/api/routes/mcp/oauth.ts`,
+  `renderLoginPage()` / `renderConsentPage()`). This is the ONLY "successful
+  login" moment this headless template has in a browser context (a human
+  authorizing an MCP client like claude.ai/ChatGPT/Claude Code to connect),
+  so the login page's verify-otp success handler also fires
+  `window.chippInsights?.identify(email)` using the client-read email value
+  -- never a server-interpolated one, consistent with the existing "no
+  inline user-controlled values in the script" invariant on that page.
+
+`INSIGHTS_BEACON_SCRIPT_TAG` (the exported constant) and `INSIGHTS_ENABLED`
+are computed ONCE at module load (mirrors `src/config/brand.ts`'s boot-time
+env read) and fail open by construction: a missing file, malformed JSON, or
+wrong shape renders every page exactly as before, with NO error/warn log --
+this is optional platform telemetry, never a hard dependency. Do not gate it
+behind a cookie-consent flow; there is no cookie-consent pattern anywhere in
+this template (checked at introduction time), and Chipp Insights is
+first-party operational telemetry by design, not third-party tracking.
+
+`secureHeaders()` in `app.ts` is called with no options, so no
+`Content-Security-Policy` header is emitted today -- nothing to widen for the
+beacon. If a CSP is ever added, allow `https://build.chipp.ai` in both
+`script-src` and `connect-src`.
+
 ## Database Conventions
 
 > **Detailed database rules live in `.claude/rules/database.md`** (Postgres
